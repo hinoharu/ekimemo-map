@@ -239,12 +239,15 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
     </div>
     <div class="sty" id="railStyle" hidden>
-      <div class="ctl">
+      <div class="ctl" style="grid-template-columns: auto 34px auto 74px">
+        <span class="note">色</span>
         <input type="color" id="railColor" value="#0f766e" aria-label="鉄道の線の色（1 色のとき）" title="1 色で描くときの色">
+        <span class="note">太さ</span>
         <select id="railW" aria-label="鉄道の線の太さ"><option value="1">1 px</option><option value="1.5">1.5 px</option><option value="2" selected>2 px</option><option value="3">3 px</option><option value="4">4 px</option></select>
-        <input type="range" id="railOp" min="0.2" max="1" step="0.05" value="0.85" aria-label="鉄道の線の濃さ" title="濃さ">
-        <span class="note">色なしの路線は灰色</span>
       </div>
+      <div class="label"><label for="railOp">線の濃さ</label><output id="railOpOut">100%</output></div>
+      <input type="range" id="railOp" min="0.2" max="1" step="0.05" value="1">
+      <div class="note">色はラインカラーで描くときは使いません（ラインカラーのない路線は灰色）。</div>
     </div>
     <div class="field">
       <div class="label"><label for="baseFade">背景の薄さ</label><output id="baseFadeOut">0%</output></div>
@@ -335,7 +338,21 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // Web Mercator (0..1), so a redraw is a multiply per point; only segments whose box meets the canvas are
   // drawn, one path per colour, and points closer than ~1 px to the previous drawn one are skipped.
   const railPane = map.createPane("rail"); railPane.style.zIndex = 395; railPane.style.pointerEvents = "none"; // above the base map and the filled areas, below the boundary lines
-  const RailCanvas = L.Canvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawRail(); } });
+  // A canvas renderer that keeps its drawing on small pans: while the zoom is unchanged and the padded area it
+  // drew last still covers the view, moveend does nothing (layer coordinates do not change while panning).
+  // Plain L.Canvas resizes, clears and redraws everything after every pan, which was the main cost of panning.
+  const StickyCanvas = L.Canvas.extend({
+    _update() {
+      const m = this._map;
+      if (m && this._bounds && !m._animatingZoom && this._zoom === m.getZoom() && this._size && this._size.equals(m.getSize())) {
+        const v = L.bounds(m.containerPointToLayerPoint([0, 0]), m.containerPointToLayerPoint(m.getSize()));
+        if (this._bounds.contains(v)) return;
+      }
+      L.Canvas.prototype._update.call(this);
+      this._size = m && m.getSize();
+    },
+  });
+  const RailCanvas = StickyCanvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawRail(); } });
   const railR = new RailCanvas({ pane: "rail", padding: 0.3 });
   const RAIL_NO_COLOR = "#8a8f99";
   let railData = null, railLoading = null;
@@ -392,15 +409,15 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // Click-through: every canvas covers the whole map, and the map itself handles the events.
   const dotPane = map.createPane("stations"); dotPane.style.zIndex = 610; dotPane.style.pointerEvents = "none";
   // our drawing goes in _draw: Leaflet clears the canvas and calls _draw after every pan/zoom/resize
-  const DotCanvas = L.Canvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawDots(); } });
+  const DotCanvas = StickyCanvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawDots(); } });
   const dotR = new DotCanvas({ pane: "stations", padding: 0.3 });
-  const lineR = L.canvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
+  const lineR = new StickyCanvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
   // current-position dot (an HTML marker, so it can animate): above the station dots and name labels
   // (markerPane 600; tooltips 650 and popups 700 stay on top), click-through so it never hides the stations from taps
   const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
   // unacquired-station areas: filled at full opacity on their own panes, the pane opacity makes
   // the union look uniform (overlaps don't get darker); click-through
-  const uaPane = (name, z, op) => { const p = map.createPane(name); p.style.zIndex = z; p.style.opacity = op; p.style.pointerEvents = "none"; return L.canvas({ pane: name, padding: 0.3 }); };
+  const uaPane = (name, z, op) => { const p = map.createPane(name); p.style.zIndex = z; p.style.opacity = op; p.style.pointerEvents = "none"; return new StickyCanvas({ pane: name, padding: 0.3 }); };
   const uaRK = uaPane("uaK", 380, 0.18), uaR1 = uaPane("ua1", 390, 0.3);
   const uaLayerK = L.layerGroup().addTo(map), uaLayer1 = L.layerGroup().addTo(map);
   const vorLayer = L.layerGroup().addTo(map);
@@ -638,10 +655,17 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const nameCanvas = L.DomUtil.create("canvas", "leaflet-zoom-hide", namePane);
   const nameCtx = nameCanvas.getContext("2d");
   let nameFont = null;
-  const NAME_PAD = 0.2; // drawn this much beyond each screen edge, so names are there while dragging
+  const NAME_PAD = 0.3; // drawn this much beyond each screen edge, so names are there while dragging
+  let nameDrawn = null; // { zoom, bounds (layer px) } of the last drawing
+  function updateLabelsOnMove() { // skip while the last drawing still covers the view (same zoom)
+    const v = L.bounds(map.containerPointToLayerPoint([0, 0]), map.containerPointToLayerPoint(map.getSize()));
+    if (nameDrawn && nameDrawn.zoom === map.getZoom() && nameDrawn.bounds.contains(v)) return;
+    updateLabels();
+  }
   function updateLabels() {
     const view = map.getSize(), off = view.multiplyBy(NAME_PAD).round(), size = view.add(off.multiplyBy(2));
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    nameDrawn = { zoom: map.getZoom(), bounds: L.bounds(map.containerPointToLayerPoint(off.multiplyBy(-1)), map.containerPointToLayerPoint(view.add(off))) };
     if (nameCanvas.width !== Math.round(size.x * dpr) || nameCanvas.height !== Math.round(size.y * dpr)) {
       nameCanvas.width = Math.round(size.x * dpr); nameCanvas.height = Math.round(size.y * dpr);
       nameCanvas.style.width = size.x + "px"; nameCanvas.style.height = size.y + "px";
@@ -665,7 +689,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const draw = (list, px, dx, color) => {
       ctx.font = `700 ${px}px ${nameFont}`; ctx.lineWidth = px >= 14 ? 4 : 3.5;
       for (const i of list) {
-        const r = st.rows[i], q = map.latLngToContainerPoint([r[4], r[5]]), x = q.x + dx, y = q.y;
+        const r = st.rows[i], q = map.latLngToContainerPoint([r[4], r[5]]), x = q.x + dx, y = q.y; // canvas placed at this view
         ctx.strokeText(r[2], x, y); ctx.fillStyle = color(r); ctx.fillText(r[2], x, y);
       }
     };
@@ -673,7 +697,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     draw(ua, 12, 7, (r) => r[6] ? "#8e44ad" : "#d1267a");
     if (st.sel >= 0 && st.rows[st.sel]) draw([st.sel], 14, 13, () => "#c2410c");
   }
-  map.on("moveend", updateLabels);
+  map.on("moveend", updateLabelsOnMove);
   map.on("resize", updateLabels);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateLabels); // redraw once the web font is in
   $("showNames").addEventListener("change", updateLabels);
@@ -950,26 +974,30 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function drawView() {
     const job = ++st.viewJob; viewLayer.clearLayers();
     if (!$("viewAll").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("view"); return; }
-    const ids = stationsForView(st.k, 0.1);
+    st.viewDrawn = { zoom: map.getZoom(), bounds: map.getBounds().pad(0.2) };
+    const ids = stationsForView(st.k, 0.2);
     const CAP = 800, todo = ids.slice(0, CAP);
     regionsAsync("view", todo.map(i => [i, st.k]), (out) => {
       if (job === st.viewJob) L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("view"), fill: false, interactive: false }).addTo(viewLayer);
     });
     if (ids.length > CAP) toast(`表示範囲の駅が多いため、中心に近い ${CAP} 駅だけ描いています。拡大すると全部描けます。`);
   }
-  map.on("moveend", () => { if ($("viewAll").checked) drawView(); });
+  // on a pan that stays inside the area drawn last (same zoom), the boundaries there are already complete
+  const coveredBy = (d) => d && d.zoom === map.getZoom() && d.bounds.contains(map.getBounds());
+  map.on("moveend", () => { if ($("viewAll").checked && !coveredBy(st.viewDrawn)) drawView(); });
 
   // order-1 diagram (nearest-station boundaries) for stations in view, independent of k.
   // ~0.5 ms per station and cached, so panning around is cheap after the first pass.
   function drawVor() {
     const job = ++st.vorJob; vorLayer.clearLayers();
     if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("vor"); return; }
+    st.vorDrawn = { zoom: map.getZoom(), bounds: map.getBounds().pad(0.2) };
     const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
     regionsAsync("vor", todo.map(i => [i, 1]), (out) => {
       if (job === st.vorJob) L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
     });
   }
-  map.on("moveend", () => { if ($("vor1").checked) drawVor(); });
+  map.on("moveend", () => { if ($("vor1").checked && !coveredBy(st.vorDrawn)) drawVor(); });
 
   // ---------------- ranking at a clicked point
   map.on("click", (e) => {
@@ -1060,7 +1088,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
   $("baseMap").addEventListener("change", () => { setBase($("baseMap").value); lookSave(); });
   $("railMode").addEventListener("change", () => { setRail($("railMode").value); lookSave(); });
-  for (const id of ["railColor", "railW", "railOp"]) $(id).addEventListener("input", () => { drawRail(); lookSave(); });
+  const railOpShow = () => { $("railOpOut").textContent = Math.round(+$("railOp").value * 100) + "%"; };
+  for (const id of ["railColor", "railW", "railOp"]) $(id).addEventListener("input", () => { railOpShow(); drawRail(); lookSave(); });
   for (const id of ["baseFade", "baseSat"]) $(id).addEventListener("input", () => { applyFade(); lookSave(); });
   // the layers control (top right) changes the same things
   map.on("baselayerchange", (e) => { const k = Object.keys(BASES).find(k => BASES[k][1] === e.layer); if (k) { $("baseMap").value = k; lookSave(); } });
@@ -1071,6 +1100,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       if (/^#[0-9a-f]{6}$/i.test(m.railColor || "")) $("railColor").value = m.railColor;
       if (m.railW && [...$("railW").options].some(o => o.value === m.railW)) $("railW").value = m.railW;
       if (Number.isFinite(+m.railOp) && m.railOp) $("railOp").value = m.railOp;
+      railOpShow();
       setRail(m.rail === true ? "orm" : m.rail === false ? "off" : m.rail); // true/false: the earlier on/off of OpenRailwayMap
       if (Number.isFinite(m.fade)) $("baseFade").value = m.fade; if (Number.isFinite(m.sat)) $("baseSat").value = m.sat;
     }
@@ -1093,6 +1123,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function setFolded(c) {
     $("panel").classList.toggle("collapsed", c);
     $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+    if (!c && st.ua.size) renderUaList(); // the list is not kept up to date while folded
   }
   $("fold").addEventListener("click", () => {
     setFolded(!$("panel").classList.contains("collapsed"));
@@ -1217,7 +1248,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const i = +b.dataset.i; select(i, false); map.panTo([st.rows[i][4], st.rows[i][5]]);
   });
   $("uaSort").addEventListener("change", renderUaList);
-  map.on("moveend", () => { if (!track.pos && $("uaSort").value === "near" && st.ua.size) renderUaList(); });
+  map.on("moveend", () => { if (!track.pos && $("uaSort").value === "near" && st.ua.size && !$("panel").classList.contains("collapsed")) renderUaList(); });
   $("selbox").addEventListener("click", (e) => { if (e.target.id === "uaToggleSel" && st.sel >= 0) toggleUa(st.sel); });
   // filled areas: union of R_1 (位置登録) / R_k (レーダー) over all unacquired stations (async, cached per station)
   function drawUaAreas() {
