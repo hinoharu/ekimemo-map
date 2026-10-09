@@ -155,7 +155,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
       <button class="btn" id="uaClear">すべて消す</button>
       <input type="file" id="uaFile" accept=".csv,text/csv" hidden>
     </div>
-    <div class="note">駅メモの駅メモ機能から書き出した CSV を読み込みます（メモ本文が ❌ の駅を未取得とみなします）。地図の駅を<b>長押し</b>（PC では右クリック）すると、取得済み／未取得を切り替えられます。データはこのブラウザの中にだけ保存します。</div>
+    <div class="note">「駅名」の列がある CSV を読み込みます（「メモ本文」の列があれば ❌ の行だけを未取得とみなします）。「CSV に書き出す」で保存したものも読み込めます。地図の駅を<b>長押し</b>（PC では右クリック）すると、取得済み／未取得を切り替えられます。データはこのブラウザの中にだけ保存します。</div>
     <div class="note" id="uaInfo"></div>
     <label class="check"><input type="checkbox" id="uaArea1"> 未取得駅を位置登録で取れる範囲を塗る（最寄り駅になる範囲）</label>
     <label class="check"><input type="checkbox" id="uaAreaK"> 未取得駅をレーダーで取れる範囲を塗る（k 位以内に入る範囲）</label>
@@ -808,7 +808,9 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       (r[ci.closed] === "1" || r[ci.closed] === "true") ? 1 : 0, +r[ci.pref]]);
   }
 
-  // ---------------- unacquired stations (駅メモ "station memo" CSV: 最終更新日, 駅名, メモ本文; ❌ = unacquired)
+  // ---------------- unacquired stations
+  // CSV in: needs a 駅名 column; if a メモ本文 column exists, only rows containing ❌ count (the user's test data
+  // came from another tool in that shape). CSV out: our own format 駅名, 未取得にした日時.
   const nowStamp = () => { const d = new Date(), z = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`; };
   function saveUa() { try { localStorage.setItem("unacq", JSON.stringify([...st.ua])); } catch (e) {} }
@@ -886,8 +888,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     let text = new TextDecoder("utf-8").decode(buf);
     if (text.includes("\uFFFD")) try { text = new TextDecoder("shift_jis").decode(buf); } catch (e) {}
     const rows = parseCsv(text.replace(/^\uFEFF/, ""));
-    const h = rows[0] || [], cName = h.indexOf("駅名"), cMemo = h.indexOf("メモ本文"), cDate = h.indexOf("最終更新日");
-    if (cName < 0) { toast("「駅名」の列がない CSV です。駅メモから書き出した CSV を選んでください。"); return; }
+    const h = rows[0] || [], cName = h.indexOf("駅名"), cMemo = h.indexOf("メモ本文"), cDate = Math.max(h.indexOf("未取得にした日時"), h.indexOf("最終更新日"));
+    if (cName < 0) { toast("「駅名」の列がない CSV です。"); return; }
     const known = new Set(st.all.map(r => r[2])), next = new Map(), unknown = [];
     for (const r of rows.slice(1)) {
       const name = (r[cName] || "").trim();
@@ -903,11 +905,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("uaExport").addEventListener("click", () => {
     if (!st.ua.size) { toast("未取得駅がありません。"); return; }
     const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
-    const lines = [["最終更新日", "駅名", "メモ本文"].map(q).join(",")]
-      .concat([...st.ua].map(([name, date]) => [date, name, "❌"].map(q).join(",")));
+    const lines = [["駅名", "未取得にした日時"].map(q).join(",")]
+      .concat([...st.ua].map(([name, date]) => [name, date].map(q).join(",")));
     const blob = new Blob(["\uFEFF" + lines.join("\r\n") + "\r\n"], { type: "text/csv" });
     const a = document.createElement("a"), d = nowStamp().replace(/[-:]/g, "").replace(" ", "-");
-    a.href = URL.createObjectURL(blob); a.download = `station-memos-${d}.csv`;
+    a.href = URL.createObjectURL(blob); a.download = `unacquired-stations-${d}.csv`;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
   $("uaClear").addEventListener("click", () => {
