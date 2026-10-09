@@ -21,7 +21,7 @@
 | `src/index.template.html` | 画面・操作・Leaflet 連携。`/*CORE*/` `/*DATA*/` `/*VERSION*/` をビルドで置換 |
 | `src/sw.js` | Service Worker（オフライン対応）。ビルドで `/*BUILD*/` をビルドのハッシュに置き換えて `dist/sw.js` に出力 |
 | `src/manifest.webmanifest` | Web アプリマニフェスト（Android の Chrome で「インストール」できるように。名前「駅レーダー圏マップ」、短い名前「駅レーダー」） |
-| `src/icons/` | アプリのアイコン。`design-a.svg`〜`design-d.svg` は 4 案の原画（512 px 四方、大事な部分は中央 80% に収める）で、**A を採用**。PNG（`icon-192.png` `icon-512.png`＝角丸、`icon-maskable-512.png` `apple-touch-icon.png`＝全面）は `npm run icons`（`scripts/make_icons.js [a〜d]`、Playwright の Chromium で書き出す）で作ってコミットする。ビルドはコピーするだけ |
+| `src/icons/` | アプリのアイコン。`design-a.svg`〜`design-d.svg` は 4 案の原画（512 px 四方、大事な部分は中央 80% に収める）で、**A を採用**。原画は `scripts/icon_designs.js` が書き出す（デザインを変えるときはこのスクリプトを直して実行。見比べ用の `build/icon-designs.html` も作る）。PNG（`icon-192.png` `icon-512.png`＝角丸、`icon-maskable-512.png` `apple-touch-icon.png`＝全面）は `npm run icons`（`scripts/make_icons.js [a〜d]`、Playwright の Chromium で書き出す）で作ってコミットする。ビルドはコピーするだけ |
 | `scripts/build.py` | 上の2つと `data/station.csv` を組み立てて `dist/index.html` を作る。`data/lines.json` を `dist/` にコピーし、`src/sw.js` から `dist/sw.js` を作る。マニフェストとアイコンの PNG も `dist/` にコピーする。`--fetch` で駅データと路線データを取得 |
 | `data/station.csv`, `data/VERSION` | 駅データのスナップショット（オフラインでも再現できるようにコミットしている） |
 | `data/lines.json` | 路線の線形（station_database の `out/main/polyline/*.json` を約 10 m の誤差で簡略化）とラインカラー。`build.py --fetch` で更新し、`dist/lines.json` として公開する（ページは鉄道の線を表示するときだけ読み込む） |

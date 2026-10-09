@@ -1,4 +1,5 @@
-// Renders the app icon PNGs from an SVG design in src/icons/ (design-a.svg ... design-d.svg; a is in use).
+// Renders the app icon PNGs from an SVG design in src/icons/ (design-a.svg ... design-d.svg; a is in use;
+// the SVGs themselves are written by scripts/icon_designs.js).
 //   node scripts/make_icons.js [a|b|c|d]
 // The designs are full-bleed 512 x 512 squares with everything that matters inside the central 80 %, so the same
 // picture serves as the "maskable" icon (Android cuts it to a circle or rounded square). Needs Playwright with
