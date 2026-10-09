@@ -163,7 +163,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .geo-ctl a svg { width: 20px; height: 20px; }
 .geo-ctl a.on { background: var(--region); color: #fff; }
 .geo-ctl a.on:hover { background: #174b86; }
-.geo-ctl a.armed { color: var(--region); } /* follow is on but the location is not in use */
+.geo-ctl a.armed { color: var(--region); }
+.geo-ctl a[hidden] { display: none; } /* follow is on but the location is not in use */
 </style>
 </head>
 <body>
@@ -387,6 +388,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ---------------- map
   const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([35.68, 139.76], 11);
   const zoomCtl = L.control.zoom({ position: "topright" }).addTo(map);
+  const viewCtl = L.control({ position: "topright" }); // view buttons (rank numbers, three-fold, clear); built below
   const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
   // load tiles while the map is still moving (Leaflet's default on phones waits until it stops) and keep
   // 4 rows of tiles beyond the screen, so going back and forth does not reload them
@@ -728,7 +730,14 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function redraw(fly) {
     regionLayer.clearLayers(); levelLayer.clearLayers();
     drawDots();
-    if (st.sel < 0) return;
+    if (viewCtl.update) viewCtl.update();
+    if (st.sel < 0) { // nothing selected (cleared)
+      $("selbox").innerHTML = '<div class="note">駅を選んでいません。地図の駅をタップするか、上の欄で検索してください。</div>';
+      st.levelJob++; cancelAsync("lv");
+      drawUaAreas(); updateLabels();
+      track.prev = null; if (track.pos) evaluate(false);
+      return;
+    }
     const r = st.rows[st.sel];
     const t0 = performance.now();
     const R = region(st.sel, st.k);
@@ -1135,6 +1144,41 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     for (const a of [geoCtl.geo, geoCtl.follow, geoCtl.jump]) a.setAttribute("aria-label", a.title);
   };
   geoCtl.addTo(map); geoCtl.update();
+  // map buttons for the view: [rank numbers] [three-fold view] [clear the selection] (the same as the panel's items)
+  const ICON_MARKS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M10 9.2 12.6 7.5V16.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const ICON_TRIPLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="6" stroke-dasharray="3 2"/><circle cx="12" cy="12" r="2.5" stroke-dasharray="1 1.6"/></svg>';
+  const ICON_CLEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3 2.4"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/></svg>';
+  viewCtl.onAdd = () => {
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl view-ctl");
+    const mk = (html, fn) => {
+      const a = L.DomUtil.create("a", "", box); a.href = "#"; a.setAttribute("role", "button"); a.innerHTML = html;
+      L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); fn(); });
+      return a;
+    };
+    const flip = (id) => { const e = $(id); e.checked = !e.checked; e.dispatchEvent(new Event("change")); viewCtl.update(); };
+    viewCtl.marks = mk(ICON_MARKS, () => flip("radarMarks"));
+    viewCtl.triple = mk(ICON_TRIPLE, () => flip("triple"));
+    viewCtl.clear = mk(ICON_CLEAR, clearSel);
+    L.DomEvent.disableClickPropagation(box);
+    return box;
+  };
+  viewCtl.update = () => {
+    if (!viewCtl.marks) return;
+    const m = $("radarMarks").checked, t = $("triple").checked;
+    viewCtl.marks.classList.toggle("on", m); viewCtl.marks.setAttribute("aria-pressed", String(m));
+    viewCtl.marks.title = `レーダーに入る駅に順位の番号：${m ? "オン" : "オフ"}`;
+    viewCtl.triple.classList.toggle("on", t); viewCtl.triple.setAttribute("aria-pressed", String(t));
+    viewCtl.triple.title = `三重表示（k・k−2・k−6）：${t ? "オン" : "オフ"}`;
+    viewCtl.clear.hidden = st.sel < 0; viewCtl.clear.title = "選んだ駅の選択を解除";
+    for (const a of [viewCtl.marks, viewCtl.triple, viewCtl.clear]) a.setAttribute("aria-label", a.title);
+  };
+  viewCtl.addTo(map);
+  function clearSel() {
+    st.sel = -1; $("q").value = "";
+    try { history.replaceState(null, "", `#k=${st.k}&m=${st.metric}`); } catch (e) {}
+    redraw(false);
+  }
+  for (const id of ["radarMarks", "triple"]) $(id).addEventListener("change", () => viewCtl.update());
   setInterval(() => { // periodic re-centering
     if (following() && track.pos && !paused()) {
       const c = map.getCenter();
