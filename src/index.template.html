@@ -78,13 +78,6 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 .rank .n { color: var(--muted); text-align: right; }
 .rank .verdict { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); }
 .leaflet-container { font-family: var(--font-body); }
-.lbl-wrap { background: none; border: none; }
-.lbl { display: inline-block; font-size: 12px; line-height: 15px; font-weight: 700; color: var(--ink); white-space: nowrap; pointer-events: none;
-  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 2px #fff, 0 0 1px #fff; }
-.lbl.closed { color: var(--muted); }
-.lbl.on { color: var(--station); font-size: 14px; line-height: 17px; }
-.lbl.ua { color: var(--ua); }
-.lbl.ua.closed { color: var(--ua-closed); }
 .ualist { margin: 0; padding: 0; list-style: none; max-height: 240px; overflow: auto; display: grid; gap: 1px; font-size: 12.5px; }
 .ualist button { display: grid; grid-template-columns: 1fr auto; gap: 8px; width: 100%; border: none; background: none; padding: 4px 6px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; border-radius: 3px; }
 .ualist button:hover { background: #f3eef6; }
@@ -148,7 +141,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 
   <div class="field">
     <label class="check"><input type="checkbox" id="vor1"> 最寄り駅の境界を常に描く（1 次ボロノイ図・位置登録される駅の範囲）</label>
-    <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき）</label>
+    <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき。未取得駅はより広い範囲でも）</label>
     <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
     <label class="check"><input type="checkbox" id="viewAll"> 表示中の全駅の境界を描く（k 次ボロノイ図）</label>
     <label class="check"><input type="checkbox" id="showClosed" checked> 廃駅も含める</label>
@@ -302,7 +295,6 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const viewLayer = L.layerGroup().addTo(map);
   const levelLayer = L.layerGroup().addTo(map);
   const regionLayer = L.layerGroup().addTo(map);
-  const labelLayer = L.layerGroup().addTo(map);
   const meLayer = L.layerGroup().addTo(map);
   let markers = [];
 
@@ -431,24 +423,54 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
 
   // ---------------- station names
-  // Names sit at a fixed place right of the dot (no collision search: lightness first, nothing left out).
-  // The dots' pane is above the labels, so a name never hides a dot.
+  // Drawn as text on one canvas (no HTML element per name: rebuilding hundreds of elements with a text-shadow
+  // halo on every move was the main cost of panning on phones). Fixed place right of the dot, nothing left out.
+  // The canvas sits below the dots' pane (so a name never hides a dot), is click-through, moves with the map
+  // while dragging, hides during the zoom animation and is redrawn on moveend.
+  const NAME_MIN_ZOOM = 12, NAME_MAX = 1500;  // all names: from this zoom, up to this many on screen
+  const UA_NAME_MIN_ZOOM = 9, UA_NAME_MAX = 800; // unacquired: from a wider view (nearest to the center first)
+  const namePane = map.createPane("names"); namePane.style.zIndex = 600; namePane.style.pointerEvents = "none";
+  const nameCanvas = L.DomUtil.create("canvas", "leaflet-zoom-hide", namePane);
+  const nameCtx = nameCanvas.getContext("2d");
+  let nameFont = null;
+  const NAME_PAD = 0.2; // drawn this much beyond each screen edge, so names are there while dragging
   function updateLabels() {
-    labelLayer.clearLayers();
-    if (!$("showNames").checked || map.getZoom() < 12 || !st.rows.length) return;
-    const b = map.getBounds(), ids = [];
-    for (let i = 0; i < st.rows.length; i++) if (b.contains([st.rows[i][4], st.rows[i][5]])) ids.push(i);
-    if (st.sel >= 0 && !ids.includes(st.sel)) ids.push(st.sel);
-    if (ids.length > 450) return; // too crowded to read; zoom in
-    for (const i of ids) {
-      const r = st.rows[i], on = i === st.sel, ua = isUa(i), cls = "lbl" + (on ? " on" : "") + (r[6] ? " closed" : "") + (ua ? " ua" : "");
-      L.marker([r[4], r[5]], {
-        icon: L.divIcon({ className: "lbl-wrap", html: `<span class="${cls}">${esc(r[2])}</span>`, iconSize: null, iconAnchor: on ? [-13, 9] : ua ? [-7, 8] : [-6, 8] }),
-        interactive: false, keyboard: false,
-      }).addTo(labelLayer);
+    const view = map.getSize(), off = view.multiplyBy(NAME_PAD).round(), size = view.add(off.multiplyBy(2));
+    const dpr = window.devicePixelRatio || 1;
+    if (nameCanvas.width !== Math.round(size.x * dpr) || nameCanvas.height !== Math.round(size.y * dpr)) {
+      nameCanvas.width = Math.round(size.x * dpr); nameCanvas.height = Math.round(size.y * dpr);
+      nameCanvas.style.width = size.x + "px"; nameCanvas.style.height = size.y + "px";
     }
+    L.DomUtil.setPosition(nameCanvas, map.containerPointToLayerPoint(off.multiplyBy(-1)));
+    const ctx = nameCtx; ctx.setTransform(dpr, 0, 0, dpr, off.x * dpr, off.y * dpr); ctx.clearRect(-off.x, -off.y, size.x, size.y);
+    if (!$("showNames").checked || !st.rows.length) return;
+    const z = map.getZoom(), b = map.getBounds().pad(NAME_PAD + 0.02), all = [], ua = [];
+    const wantAll = z >= NAME_MIN_ZOOM, wantUa = z >= UA_NAME_MIN_ZOOM && st.ua.size > 0;
+    if (wantAll || wantUa) for (let i = 0; i < st.rows.length; i++) {
+      if (i === st.sel || !b.contains([st.rows[i][4], st.rows[i][5]])) continue;
+      if (isUa(i)) { if (wantUa) ua.push(i); } else if (wantAll) all.push(i);
+    }
+    if (all.length + ua.length > NAME_MAX) all.length = 0; // too crowded to read: keep only unacquired / selected
+    if (ua.length > UA_NAME_MAX) {
+      const c = map.getCenter(), d = (i) => (st.rows[i][4] - c.lat) ** 2 + (st.rows[i][5] - c.lng) ** 2;
+      ua.sort((a, q) => d(a) - d(q)); ua.length = UA_NAME_MAX;
+    }
+    nameFont = nameFont || getComputedStyle(document.body).fontFamily;
+    ctx.textBaseline = "middle"; ctx.lineJoin = "round"; ctx.strokeStyle = "#fff";
+    const draw = (list, px, dx, color) => {
+      ctx.font = `700 ${px}px ${nameFont}`; ctx.lineWidth = px >= 14 ? 4 : 3.5;
+      for (const i of list) {
+        const r = st.rows[i], q = map.latLngToContainerPoint([r[4], r[5]]), x = q.x + dx, y = q.y;
+        ctx.strokeText(r[2], x, y); ctx.fillStyle = color(r); ctx.fillText(r[2], x, y);
+      }
+    };
+    draw(all, 12, 6, (r) => r[6] ? "#687089" : "#1d2433");
+    draw(ua, 12, 7, (r) => r[6] ? "#8e44ad" : "#d1267a");
+    if (st.sel >= 0 && st.rows[st.sel]) draw([st.sel], 14, 13, () => "#c2410c");
   }
   map.on("moveend", updateLabels);
+  map.on("resize", updateLabels);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateLabels); // redraw once the web font is in
   $("showNames").addEventListener("change", updateLabels);
 
   // ---------------- current position, tracking and notifications
