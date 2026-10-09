@@ -527,7 +527,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // hover (mouse): the station name as a tooltip, pointer cursor
   const dotTip = L.tooltip({ direction: "top", offset: [0, -6] });
   let hoverI = -1, hoverRaf = 0, hoverLp = null;
+  // touch screens also send mouse events after a tap; the hover tooltip is for mice only
+  let lastTouch = 0;
+  map.getContainer().addEventListener("touchstart", () => { lastTouch = Date.now(); hoverI = -1; dotTip.remove(); }, { passive: true });
   map.on("mousemove", (e) => {
+    if (Date.now() - lastTouch < 1500) return;
     hoverLp = e.layerPoint; if (hoverRaf) return;
     hoverRaf = requestAnimationFrame(() => {
       hoverRaf = 0; const i = hitStation(hoverLp);
@@ -646,7 +650,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const ms = performance.now() - t0;
     const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), fillColor: st.style.sel.color, fillOpacity: 0.16, interactive: false });
     poly.addTo(regionLayer);
-    if (fly && !st.bootView) map.fitBounds(poly.getBounds(), { padding: [40, 40], maxZoom: 13 });
+    if (fly && !st.bootView) fitVisible(poly.getBounds(), { maxZoom: 13 });
     const area = sphericalArea(R.latlng);
     $("selbox").innerHTML =
       `<div class="name">${esc(r[2])}<small>${esc(r[3])}${r[6] ? "・廃駅" : ""}</small>${isUa(st.sel) ? '<span class="badge">未取得</span>' : ""}</div>` +
@@ -737,12 +741,20 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   });
   // "Center" = center of the part of the map the panel does not cover (bottom sheet on phones,
   // left column on wide screens); the plain container center is hidden behind the sheet on phones.
-  function viewOffset() {
+  // The part of the map (container px) the panel does not cover. Used for every "show this" move:
+  // following, jumping to the position, tapping a station, picking one from a list, fitting a region.
+  function visibleArea() {
     const m = map.getContainer().getBoundingClientRect(), p = $("panel").getBoundingClientRect();
     let x0 = 0, x1 = m.width, y1 = m.height;
     if (p.width > m.width * 0.6 && p.bottom >= m.bottom - 40) y1 = Math.max(m.height * 0.3, p.top - m.top); // bottom sheet
     else if (p.left <= m.left + 40 && p.height > m.height * 0.5) x0 = Math.min(m.width * 0.7, p.right - m.left); // left column
-    return L.point((x0 + x1) / 2 - m.width / 2, y1 / 2 - m.height / 2);
+    return { x0, x1, y1, w: m.width, h: m.height };
+  }
+  function viewOffset() { const a = visibleArea(); return L.point((a.x0 + a.x1) / 2 - a.w / 2, a.y1 / 2 - a.h / 2); }
+  // fit bounds inside the visible part (40 px margin)
+  function fitVisible(bounds, opts) {
+    const a = visibleArea();
+    map.fitBounds(bounds, { ...opts, paddingTopLeft: [a.x0 + 40, 40], paddingBottomRight: [a.w - a.x1 + 40, a.h - a.y1 + 40] });
   }
   const centerFor = (lat, lng, z = map.getZoom()) => map.unproject(map.project([lat, lng], z).subtract(viewOffset()), z);
   function centerOn(lat, lng, opts) { map.panTo(centerFor(lat, lng), opts); }
@@ -1021,7 +1033,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ---------------- ranking at a clicked point
   map.on("click", (e) => {
     const hitI = hitStation(e.layerPoint);
-    if (hitI >= 0) { select(hitI, false); map.panTo([st.rows[hitI][4], st.rows[hitI][5]]); return; } // tap on a station
+    if (hitI >= 0) { select(hitI, false); centerOn(st.rows[hitI][4], st.rows[hitI][5]); return; } // tap on a station
     if (!$("dbgRank").checked) return; // debug tool, off by default
     const { lat, lng } = e.latlng, n = st.rows.length;
     const K = Math.max(st.k, 5), top = [];
@@ -1268,7 +1280,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
   $("uaList").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    const i = +b.dataset.i; select(i, false); map.panTo([st.rows[i][4], st.rows[i][5]]);
+    const i = +b.dataset.i; select(i, false); centerOn(st.rows[i][4], st.rows[i][5]);
   });
   $("uaSort").addEventListener("change", renderUaList);
   map.on("moveend", () => { if (!track.pos && $("uaSort").value === "near" && st.ua.size && !$("panel").classList.contains("collapsed")) renderUaList(); });
