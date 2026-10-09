@@ -285,17 +285,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   L.control.layers({ "OpenStreetMap": osm, "地理院 淡色": gsi }, null, { position: "topright" }).addTo(map);
   map.attributionControl.addAttribution('駅データ: <a href="https://github.com/Seo-4d696b75/station_database">station_database</a> (CC BY 4.0)');
 
-  // Station dots get their own pane above the boundary lines. With preferCanvas, every canvas
-  // renderer is a full-map <canvas>; only the topmost one receives clicks, so the dots' canvas
-  // must be on top or tapping a station does nothing (non-hit clicks still reach the map).
-  // 610: also above the name labels (markerPane 600), so a label never hides a dot (the tap target)
-  map.createPane("stations").style.zIndex = 610;
-  const canvasR = L.canvas({ pane: "stations", padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
+  // Station dots: drawn by us on the canvas of a layer-less L.Canvas renderer (Leaflet sizes, positions and
+  // zoom-animates it); no Leaflet object per station. Taps are hit-tested on the map events (hitStation).
+  // Pane 610: above the boundary lines and the name labels (markerPane 600), so nothing hides a dot.
+  // Click-through: every canvas covers the whole map, and the map itself handles the events.
+  const dotPane = map.createPane("stations"); dotPane.style.zIndex = 610; dotPane.style.pointerEvents = "none";
+  // our drawing goes in _draw: Leaflet clears the canvas and calls _draw after every pan/zoom/resize
+  const DotCanvas = L.Canvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawDots(); } });
+  const dotR = new DotCanvas({ pane: "stations", padding: 0.3 });
   const lineR = L.canvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
   // current-position dot (an HTML marker, so it can animate): above the station dots and name labels
   // (markerPane 600; tooltips 650 and popups 700 stay on top), click-through so it never hides the stations from taps
   const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
-  const stationLayer = L.layerGroup().addTo(map);
   // unacquired-station areas: filled at full opacity on their own panes, the pane opacity makes
   // the union look uniform (overlaps don't get darker); click-through
   const uaPane = (name, z, op) => { const p = map.createPane(name); p.style.zIndex = z; p.style.opacity = op; p.style.pointerEvents = "none"; return L.canvas({ pane: name, padding: 0.3 }); };
@@ -306,7 +307,6 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const levelLayer = L.layerGroup().addTo(map);
   const regionLayer = L.layerGroup().addTo(map);
   const meLayer = L.layerGroup().addTo(map);
-  let markers = [];
 
   // ---------------- data
   function loadRows(rows, version) {
@@ -334,36 +334,72 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function stationStyle(i) {
     const r = st.rows[i], ua = isUa(i), sel = i === st.sel;
     return {
-      renderer: canvasR, radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1, color: "#fff",
+      radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
       fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : (r[6] ? "#9aa0ad" : "#c2410c"),
-      fillOpacity: st.ua.size && !ua ? 0.5 : 0.95, // with a list loaded, acquired stations recede
+      fillOpacity: st.ua.size && !ua && !sel ? 0.5 : 0.95, // with a list loaded, acquired stations recede
     };
   }
   const stationTip = (i) => st.rows[i][2] + (st.rows[i][6] ? "（廃駅）" : "") + (isUa(i) ? "（未取得）" : "");
-  function drawStations() {
-    stationLayer.clearLayers(); markers = [];
-    st.rows.forEach((r, i) => {
-      const m = L.circleMarker([r[4], r[5]], stationStyle(i));
-      m.bindTooltip(stationTip(i), { direction: "top", offset: [0, -4] });
-      m.on("click", (e) => { L.DomEvent.stopPropagation(e); select(i, false); map.panTo([r[4], r[5]]); });
-      // long press (touch) / right click: toggle acquired <-> unacquired
-      m.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); });
-      m.addTo(stationLayer); markers.push(m);
+  const SEL_RING = 9.5; // selected: dot r 7, ~1 px white gap, colored ring 8.5–10.5 px, white rim to 11.5 px
+  let hit = { i: new Int32Array(0), x: new Float32Array(0), y: new Float32Array(0), r: new Float32Array(0), n: 0 };
+  // Draw the dots inside the renderer's (padded) bounds, batched by style: one path per style group.
+  function drawDots() {
+    const ctx = dotR._ctx, b = dotR._bounds;
+    if (!ctx || !b || !st.rows.length) return;
+    ctx.clearRect(b.min.x, b.min.y, b.max.x - b.min.x, b.max.y - b.min.y);
+    const llb = L.latLngBounds(map.layerPointToLatLng(b.min), map.layerPointToLatLng(b.max));
+    const S = llb.getSouth(), N = llb.getNorth(), W = llb.getWest(), E = llb.getEast();
+    const groups = new Map(), n = st.rows.length;
+    const hi = new Int32Array(n), hx = new Float32Array(n), hy = new Float32Array(n), hr = new Float32Array(n);
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const r = st.rows[i];
+      if (r[4] < S || r[4] > N || r[5] < W || r[5] > E || i === st.sel) continue;
+      const p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(i), key = `${s.fillColor}|${s.fillOpacity}|${s.radius}|${s.weight}`;
+      let g = groups.get(key); if (!g) groups.set(key, g = { s, pts: [] });
+      g.pts.push(p.x, p.y);
+      hi[m] = i; hx[m] = p.x; hy[m] = p.y; hr[m] = s.radius; m++;
+    }
+    // unacquired (larger) on top of the others
+    const order = [...groups.values()].sort((a, z) => a.s.radius - z.s.radius);
+    for (const { s, pts } of order) {
+      ctx.beginPath();
+      for (let k = 0; k < pts.length; k += 2) { ctx.moveTo(pts[k] + s.radius, pts[k + 1]); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); }
+      ctx.globalAlpha = s.fillOpacity; ctx.fillStyle = s.fillColor; ctx.fill();
+      ctx.globalAlpha = 1; ctx.lineWidth = s.weight; ctx.strokeStyle = "#fff"; ctx.stroke();
+    }
+    if (st.sel >= 0 && st.rows[st.sel]) { // the selected station: dot + ring, on top
+      const r = st.rows[st.sel], p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(st.sel);
+      const circle = (rad, w, color, fill) => { ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, 2 * Math.PI); if (fill) { ctx.fillStyle = fill; ctx.globalAlpha = s.fillOpacity; ctx.fill(); ctx.globalAlpha = 1; } ctx.lineWidth = w; ctx.strokeStyle = color; ctx.stroke(); };
+      circle(SEL_RING, 4, "#fff"); circle(SEL_RING, 2, s.fillColor); circle(s.radius, s.weight, "#fff", s.fillColor);
+      hi[m] = st.sel; hx[m] = p.x; hy[m] = p.y; hr[m] = SEL_RING; m++;
+    }
+    hit = { i: hi, x: hx, y: hy, r: hr, n: m };
+  }
+  dotR.addTo(map);
+  // nearest drawn station within reach of a tap (the dot's radius + 8 px), or -1
+  function hitStation(lp) {
+    let best = -1, bd = Infinity;
+    for (let k = 0; k < hit.n; k++) {
+      const dx = hit.x[k] - lp.x, dy = hit.y[k] - lp.y, d = dx * dx + dy * dy, reach = hit.r[k] + 8;
+      if (d <= reach * reach && d < bd) { bd = d; best = hit.i[k]; }
+    }
+    return best;
+  }
+  // hover (mouse): the station name as a tooltip, pointer cursor
+  const dotTip = L.tooltip({ direction: "top", offset: [0, -6] });
+  let hoverI = -1, hoverRaf = 0, hoverLp = null;
+  map.on("mousemove", (e) => {
+    hoverLp = e.layerPoint; if (hoverRaf) return;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0; const i = hitStation(hoverLp);
+      if (i === hoverI) return; hoverI = i;
+      map.getContainer().style.cursor = i >= 0 ? "pointer" : "";
+      if (i < 0) dotTip.remove(); else dotTip.setLatLng([st.rows[i][4], st.rows[i][5]]).setContent(stationTip(i)).addTo(map);
     });
-    st.styledSel = st.sel;
-  }
-  // ring around the selected station (non-interactive, so taps still reach the dot below it)
-  const SEL_RING = 9.5; // ring centre line: colored 8.5–10.5 px, white 7.5–11.5 px; ~1 px gap to the dot (r 7)
-  let selRing = null;
-  function placeSelRing() {
-    if (selRing) { stationLayer.removeLayer(selRing[0]); stationLayer.removeLayer(selRing[1]); selRing = null; }
-    if (st.sel < 0 || !st.rows[st.sel]) return;
-    const r = st.rows[st.sel], ll = [r[4], r[5]], col = stationStyle(st.sel).fillColor;
-    selRing = [L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: "#fff", weight: 4, fill: false, interactive: false }),
-               L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: col, weight: 2, fill: false, interactive: false })];
-    selRing.forEach(c => c.addTo(stationLayer));
-  }
-  function restyleStation(i) { if (i >= 0 && markers[i]) { markers[i].setStyle(stationStyle(i)); markers[i].setTooltipContent(stationTip(i)); } }
+  });
+  map.on("mouseout", () => { hoverI = -1; dotTip.remove(); map.getContainer().style.cursor = ""; });
+  function drawStations() { hoverI = -1; dotTip.remove(); drawDots(); }
 
   // ---------------- line styles (per boundary kind; saved per browser)
   const STYLE_KINDS = [
@@ -407,7 +443,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   function redraw(fly) {
     regionLayer.clearLayers(); levelLayer.clearLayers();
-    const was = st.styledSel; st.styledSel = st.sel; restyleStation(was); restyleStation(st.sel); placeSelRing();
+    drawDots();
     if (st.sel < 0) return;
     const r = st.rows[st.sel];
     const t0 = performance.now();
@@ -696,7 +732,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const r = await Notification.requestPermission();
     toast(r === "granted" ? "端末の通知を許可しました。" : "通知は許可されませんでした。画面内の通知と振動で知らせます。");
   });
-  map.on("contextmenu", (e) => { track.lastUser = Date.now(); setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
+  map.on("contextmenu", (e) => {
+    const i = hitStation(e.layerPoint);
+    // long press (touch) / right click on a station: toggle acquired <-> unacquired; elsewhere: test position
+    if (i >= 0) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
+    track.lastUser = Date.now(); setPosition(e.latlng.lat, e.latlng.lng, 0, true);
+  });
 
   // contours R_1 ... R_k (async, cheap per level)
   function drawLevels() {
@@ -790,6 +831,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   // ---------------- ranking at a clicked point
   map.on("click", (e) => {
+    const hitI = hitStation(e.layerPoint);
+    if (hitI >= 0) { select(hitI, false); map.panTo([st.rows[hitI][4], st.rows[hitI][5]]); return; } // tap on a station
     if (!$("dbgRank").checked) return; // debug tool, off by default
     const { lat, lng } = e.latlng, n = st.rows.length;
     const K = Math.max(st.k, 5), top = [];
@@ -952,9 +995,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     if (was) st.ua.delete(name); else st.ua.set(name, nowStamp());
     saveUa();
     toast(was ? `${name} を取得済みにしました（もう一度長押しで戻せます）` : `${name} を未取得にしました`);
-    const first = st.ua.size === (was ? 0 : 1); // acquired stations fade only while a list exists
-    if (first) markers.forEach((m, j) => m.setStyle(stationStyle(j)));
-    restyleStation(i);
+    drawDots();
     if (i === st.sel) { redraw(false); uaChanged(false); } else uaChanged(true); // redraw() redraws the areas
   }
   // after the set changed: labels, areas, list, radar baseline (no notification for our own edit)
