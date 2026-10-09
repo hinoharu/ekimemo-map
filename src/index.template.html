@@ -559,12 +559,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     // unacquired (larger) on top of the others
     const order = [...groups.values()].sort((a, z) => a.s.radius - z.s.radius);
     for (const { s, pts } of order) {
-      ctx.beginPath();
-      for (let k = 0; k < pts.length; k += 2) { ctx.moveTo(pts[k] + s.radius, pts[k + 1]); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); }
-      // white rims first (double width, so the outer half shows), fills on top: where dots overlap (a station and the
-      // tram stop in front of it, a few px apart) a later rim must not cross an earlier fill, or the dot reads as a ring
-      ctx.globalAlpha = 1; ctx.lineWidth = s.weight * 2; ctx.strokeStyle = "#fff"; ctx.stroke();
-      ctx.globalAlpha = s.fillOpacity; ctx.fillStyle = s.fillColor; ctx.fill(); ctx.globalAlpha = 1;
+      // one dot at a time, white rim (double width, the outer half shows) then fill: overlapping dots (a station and the
+      // tram stop in front of it, a few px apart) stay separate dots. One path for all dots let a later rim cross an
+      // earlier fill (a ring); rims-then-fills merged them into one blob. Measured: no slower than one path per style.
+      ctx.lineWidth = s.weight * 2; ctx.strokeStyle = "#fff"; ctx.fillStyle = s.fillColor; ctx.globalAlpha = s.fillOpacity;
+      for (let k = 0; k < pts.length; k += 2) { ctx.beginPath(); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); ctx.stroke(); ctx.fill(); }
+      ctx.globalAlpha = 1;
     }
     if (st.sel >= 0 && st.rows[st.sel]) { // the selected station: dot + ring, on top
       const r = st.rows[st.sel], p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(st.sel);
