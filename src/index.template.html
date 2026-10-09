@@ -40,15 +40,15 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 }
 .panel.collapsed > :not(.head) { display: none; }
 /* nearest station, always on screen (option): a translucent grey gradient cushion in the top-left corner */
-#nearBox { position: fixed; z-index: 900; top: calc(10px + env(safe-area-inset-top, 0px)); left: 10px; pointer-events: none;
-  padding: 7px 14px 8px; border-radius: 12px; color: #fff; min-width: 120px; max-width: 60vw;
+#nearBox { position: fixed; z-index: 900; top: calc(8px + env(safe-area-inset-top, 0px)); left: 8px; pointer-events: none;
+  padding: 4px 11px 5px; border-radius: 10px; color: #fff; max-width: 56vw; font-family: var(--font-body);
   background: linear-gradient(135deg, rgba(38, 44, 58, 0.78), rgba(70, 78, 96, 0.5));
   box-shadow: 0 4px 16px rgba(20, 24, 34, 0.25); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 #nearBox[hidden] { display: none; }
-#nearBox .k { font-size: 10.5px; letter-spacing: 0.14em; opacity: 0.8; }
-#nearBox .n { font-size: 21px; font-weight: 700; line-height: 1.25; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#nearBox .d { font-size: 11.5px; opacity: 0.85; font-family: var(--font-data); }
-#nearBox .ua { display: inline-block; margin-left: 6px; font-size: 10.5px; padding: 0 5px; border-radius: 3px; background: var(--ua); vertical-align: 3px; }
+#nearBox .k { font-size: 9.5px; letter-spacing: 0.1em; opacity: 0.8; }
+#nearBox .n { font-size: 17px; font-weight: 700; line-height: 1.2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#nearBox .d { font-size: 10.5px; opacity: 0.85; font-variant-numeric: tabular-nums; }
+#nearBox .ua { display: inline-block; margin-left: 5px; font-size: 9.5px; padding: 0 5px; border-radius: 3px; background: var(--ua); vertical-align: 3px; }
 @media (min-width: 641px) { #nearBox { left: 380px; } }
 .radar { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12.5px; max-height: 260px; overflow: auto; }
 .radar li { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 6px; align-items: center; }
@@ -57,6 +57,24 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 .radar .d { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .radar .sep { grid-template-columns: 1fr; color: var(--muted); font-size: 11.5px; margin-top: 4px; }
 #fold .fold-ico { display: none; }
+/* compact mode (phones; e.g. split screen with the game): no zoom / layer buttons (pinch, and the panel has the
+   base map), smaller buttons, the nearest station on one line, a smaller attribution (kept in full: CC BY 4.0) */
+@media (max-width: 640px) {
+  body.compact .leaflet-control-zoom, body.compact .leaflet-control-layers { display: none; }
+  body.compact .leaflet-top.leaflet-right .leaflet-control { margin-top: 6px; margin-right: 6px; }
+  body.compact .geo-ctl a { width: 30px; height: 30px; }
+  body.compact .geo-ctl a svg { width: 17px; height: 17px; }
+  body.compact .leaflet-control-attribution { font-size: 8.5px; line-height: 1.25; padding: 0 4px; }
+  body.compact #nearBox { top: calc(6px + env(safe-area-inset-top, 0px)); left: 6px; padding: 3px 9px; border-radius: 8px; display: flex; align-items: baseline; gap: 6px; }
+  body.compact #nearBox[hidden] { display: none; }
+  body.compact #nearBox .k { font-size: 9px; letter-spacing: 0.04em; }
+  body.compact #nearBox .n { font-size: 14px; }
+  body.compact .panel { max-height: 64%; padding: 10px 12px; gap: 10px; }
+  body.compact .panel .head { margin: -10px -12px 0; padding: 10px 12px 4px; top: -10px; }
+  body.compact .panel.collapsed { right: 6px; bottom: calc(26px + env(safe-area-inset-bottom, 0px)); padding: 0; }
+  body.compact .panel.collapsed .head { margin: 0; padding: 0; }
+  body.compact .panel.collapsed #fold { width: 38px; height: 38px; }
+}
 /* phones: folded, the panel shrinks to a round menu button at the bottom right (above the attribution) */
 @media (max-width: 640px) {
   .panel.collapsed { left: auto; right: 10px; bottom: calc(34px + env(safe-area-inset-bottom, 0px)); width: auto; padding: 0; gap: 0; overflow: visible; border-radius: 50%; }
@@ -261,6 +279,14 @@ details.sub[open] > summary { margin-bottom: 4px; }
         <option value="osm" selected>OpenStreetMap</option>
         <option value="gsiPale">地理院 淡色地図</option>
         <option value="gsiStd">地理院 標準地図</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="label" for="compactMode">コンパクト表示（スマホ。ボタン類を小さく・減らす）</label>
+      <select id="compactMode">
+        <option value="auto" selected>自動（画面の高さが低いとき。画面分割など）</option>
+        <option value="on">オン</option>
+        <option value="off">オフ</option>
       </select>
     </div>
     <div class="field">
@@ -531,7 +557,9 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       ctx.beginPath();
       for (let k = 0; k < pts.length; k += 2) { ctx.moveTo(pts[k] + s.radius, pts[k + 1]); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); }
       ctx.globalAlpha = s.fillOpacity; ctx.fillStyle = s.fillColor; ctx.fill();
-      ctx.globalAlpha = 1; ctx.lineWidth = s.weight; ctx.strokeStyle = "#fff"; ctx.stroke();
+      // the white rim fades with the fill: at full strength, receded (acquired) dots in dense areas read as white rings
+      ctx.globalAlpha = s.fillOpacity < 0.9 ? 0.35 : 1; ctx.lineWidth = s.weight; ctx.strokeStyle = "#fff"; ctx.stroke();
+      ctx.globalAlpha = 1;
     }
     if (st.sel >= 0 && st.rows[st.sel]) { // the selected station: dot + ring, on top
       const r = st.rows[st.sel], p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(st.sel);
@@ -964,6 +992,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     navigator.geolocation.getCurrentPosition((p) => { if (geoOn()) onFix(p, true); }, () => {},
       { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 });
     watchGeo();
+    try { localStorage.setItem("geoUse", "1"); } catch (e) {}
     geoCtl.update();
   }
   function watchGeo() {
@@ -994,6 +1023,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function stopGeo() {
     if (track.watch !== null) navigator.geolocation.clearWatch(track.watch);
     track.watch = null;
+    try { localStorage.setItem("geoUse", "0"); } catch (e) {}
     $("geoStatus").textContent = track.pos ? "現在地の更新を止めました。" : "現在地は使っていません。";
     if (track.pos) meDotState();
     geoCtl.update();
@@ -1058,6 +1088,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const i = hitStation(e.layerPoint);
     // long press (touch) / right click on a station: toggle acquired <-> unacquired; elsewhere: test position
     if (i >= 0) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
+    if ($("geoFollow").checked) setFollow(false); // a designated position: stop keeping the current one centered
     track.lastUser = Date.now(); setPosition(e.latlng.lat, e.latlng.lng, 0, true);
   });
 
@@ -1274,6 +1305,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   });
   // phones: the panel is a bottom sheet over half the map, so it starts folded (wide screens: open)
   if (window.matchMedia("(max-width: 640px)").matches) setFolded(true);
+  // compact mode (phones only, see CSS): auto = a short screen (split screen with the game, landscape)
+  const shortMq = window.matchMedia("(max-height: 620px)");
+  function applyCompact() {
+    const m = $("compactMode").value, on = m === "on" || (m === "auto" && shortMq.matches);
+    if (document.body.classList.contains("compact") === on) return;
+    document.body.classList.toggle("compact", on);
+    map.invalidateSize();
+  }
+  try { const cm = localStorage.getItem("compactMode"); if (["auto", "on", "off"].includes(cm)) $("compactMode").value = cm; } catch (e) {}
+  $("compactMode").addEventListener("change", () => { try { localStorage.setItem("compactMode", $("compactMode").value); } catch (e) {} applyCompact(); });
+  shortMq.addEventListener ? shortMq.addEventListener("change", applyCompact) : shortMq.addListener(applyCompact);
+  applyCompact();
 
   // search
   const kataToHira = (s) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
@@ -1524,6 +1567,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // without a saved view (first visit, another device) the selected station is shown as before
   if (savedView) map.setView([savedView[0], savedView[1]], savedView[2], { animate: false });
   st.bootView = false;
+  // the location was in use before the reload: use it again (with "follow" on, the first fix re-centers)
+  try { if (localStorage.getItem("geoUse") === "1") startGeo(); } catch (e) {}
 })();
 </script>
 </body>
