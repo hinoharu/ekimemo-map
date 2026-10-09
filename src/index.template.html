@@ -422,6 +422,17 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ---------------- current position, tracking and notifications
   const track = { pos: null, watch: null, prev: null, lastUser: 0, me: null, acc: null, lastFix: 0, precise: false };
   map.on("dragstart", () => { track.lastUser = Date.now(); });
+  // "Center" = center of the part of the map the panel does not cover (bottom sheet on phones,
+  // left column on wide screens); the plain container center is hidden behind the sheet on phones.
+  function viewOffset() {
+    const m = map.getContainer().getBoundingClientRect(), p = $("panel").getBoundingClientRect();
+    let x0 = 0, x1 = m.width, y1 = m.height;
+    if (p.width > m.width * 0.6 && p.bottom >= m.bottom - 40) y1 = Math.max(m.height * 0.3, p.top - m.top); // bottom sheet
+    else if (p.left <= m.left + 40 && p.height > m.height * 0.5) x0 = Math.min(m.width * 0.7, p.right - m.left); // left column
+    return L.point((x0 + x1) / 2 - m.width / 2, y1 / 2 - m.height / 2);
+  }
+  const centerFor = (lat, lng, z = map.getZoom()) => map.unproject(map.project([lat, lng], z).subtract(viewOffset()), z);
+  function centerOn(lat, lng, opts) { map.panTo(centerFor(lat, lng), opts); }
 
   function rankAt(lat, lng) {
     const n = st.rows.length, K = Math.max(1, st.k), top = [];
@@ -447,7 +458,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       track.me = L.circleMarker([lat, lng], { renderer: meR, radius: 7, color: "#fff", weight: 2.5, fillColor: "#2563eb", fillOpacity: 1, interactive: false }).addTo(meLayer);
     }
     track.me.setLatLng([lat, lng]); track.acc.setLatLng([lat, lng]).setRadius(acc || 0);
-    if (following() && Date.now() - track.lastUser > 15000) map.panTo([lat, lng], { animate: true });
+    if (following() && Date.now() - track.lastUser > 15000) centerOn(lat, lng, { animate: true });
     evaluate(true);
     geoCtl.update();
   }
@@ -508,14 +519,14 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const first = !track.precise && !track.lastFix && following();
     track.lastFix = now; if (!quick) track.precise = true;
     setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false);
-    if (first && $("autoZoom").checked) map.setView([p.coords.latitude, p.coords.longitude], Math.max(map.getZoom(), 14));
+    if (first && $("autoZoom").checked) { const z = Math.max(map.getZoom(), 14); map.setView(centerFor(p.coords.latitude, p.coords.longitude, z), z); }
   }
   function startGeo() {
     if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; geoCtl.update(); return; }
     track.lastUser = 0; track.lastFix = 0; track.precise = false;
     if (!window.isSecureContext) $("geoStatus").textContent = "https か localhost で開いていないため、現在地を取得できない可能性があります。";
     else $("geoStatus").textContent = "現在地を取得しています…";
-    if (track.pos && !track.pos.simulated && $("geoFollow").checked) map.panTo([track.pos.lat, track.pos.lng]); // last known, right away
+    if (track.pos && !track.pos.simulated && $("geoFollow").checked) centerOn(track.pos.lat, track.pos.lng); // last known, right away
     // a quick (possibly cached / network-based) fix first, then the precise watch below takes over
     navigator.geolocation.getCurrentPosition((p) => { if (geoOn()) onFix(p, true); }, () => {},
       { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 });
@@ -544,13 +555,13 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     geoCtl.update();
   }
   function jumpToMe() {
-    if (track.pos) { track.lastUser = 0; map.panTo([track.pos.lat, track.pos.lng]); }
+    if (track.pos) { track.lastUser = 0; centerOn(track.pos.lat, track.pos.lng); }
     else if (!geoOn()) startGeo(); // nothing to jump to yet: start using the location
   }
   function setFollow(on) {
     $("geoFollow").checked = on;
     try { localStorage.setItem("geoFollow", on ? "1" : "0"); } catch (e) {}
-    if (on && track.pos) { track.lastUser = 0; map.panTo([track.pos.lat, track.pos.lng]); }
+    if (on && track.pos) { track.lastUser = 0; centerOn(track.pos.lat, track.pos.lng); }
     geoCtl.update();
   }
   $("geoUse").addEventListener("change", () => $("geoUse").checked ? startGeo() : stopGeo());
@@ -590,7 +601,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   setInterval(() => { // periodic re-centering
     if (following() && track.pos && Date.now() - track.lastUser > 15000) {
       const c = map.getCenter();
-      if (Math.abs(c.lat - track.pos.lat) + Math.abs(c.lng - track.pos.lng) > 1e-5) map.panTo([track.pos.lat, track.pos.lng]);
+      const want = centerFor(track.pos.lat, track.pos.lng);
+      if (Math.abs(c.lat - want.lat) + Math.abs(c.lng - want.lng) > 1e-5) centerOn(track.pos.lat, track.pos.lng);
     }
   }, 10000);
   $("notifPerm").addEventListener("click", async () => {
@@ -734,6 +746,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("fold").addEventListener("click", () => {
     const p = $("panel"); p.classList.toggle("collapsed");
     const c = p.classList.contains("collapsed"); $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+    if (following() && track.pos && Date.now() - track.lastUser > 15000) centerOn(track.pos.lat, track.pos.lng);
   });
 
   // search
