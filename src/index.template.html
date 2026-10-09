@@ -823,7 +823,14 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function drawVorNames(ctx) {
     if (!$("vor1").checked || map.getZoom() < VOR_NAME_MIN_ZOOM || !st.vorPolys || !st.vorPolys.length) return;
     const a = visibleArea(), X0 = a.x0 + 2, X1 = a.x1 - 2, Y0 = 2, Y1 = a.y1 - 2;
-    const self = track.radar && !$("nearBox").hidden ? track.radar.near : -1;
+    const near = track.radar ? track.radar.near : -1, self = near >= 0 && !$("nearBox").hidden ? near : -1;
+    // the text is toned down (white rim kept): 70% on the edges of the nearest station's cell, 50% elsewhere
+    const nearPoly = near >= 0 && st.vorPolys.find(e => e[0] === near), nearPts = nearPoly ? nearPoly[1].map(q => map.latLngToContainerPoint(q)) : [];
+    const onNear = (x, y) => nearPts.some((P, k) => {
+      const Q = nearPts[(k + 1) % nearPts.length], dx = Q.x - P.x, dy = Q.y - P.y, l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, ((x - P.x) * dx + (y - P.y) * dy) / l2)) : 0;
+      return Math.hypot(P.x + dx * t - x, P.y + dy * t - y) < 1.5;
+    });
     const px = 12, color = st.style.vor.color;
     ctx.font = `700 ${px}px ${nameFont}`; ctx.lineWidth = 3.5; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (const [i, ll] of st.vorPolys) {
@@ -857,7 +864,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
         let nx = -Math.sin(ang), ny = Math.cos(ang); // normal, flipped toward the station's side
         if ((sp.x - mx) * nx + (sp.y - my) * ny < 0) { nx = -nx; ny = -ny; }
         ctx.save(); ctx.translate(mx + nx * (px * 0.5 + 4), my + ny * (px * 0.5 + 4)); ctx.rotate(ang);
-        ctx.strokeText(r[2], 0, 0); ctx.fillStyle = color; ctx.fillText(r[2], 0, 0); ctx.restore();
+        ctx.strokeText(r[2], 0, 0); ctx.fillStyle = color; ctx.globalAlpha = onNear(mx, my) ? 0.7 : 0.5; ctx.fillText(r[2], 0, 0); ctx.restore();
       }
     }
     ctx.textAlign = "start";
