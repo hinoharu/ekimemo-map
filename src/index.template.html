@@ -144,6 +144,16 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき。未取得駅はより広い範囲でも）</label>
     <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
     <label class="check"><input type="checkbox" id="viewAll"> 表示中の全駅の境界を描く（k 次ボロノイ図）</label>
+    <div class="krow" style="grid-template-columns: 1fr auto">
+      <label class="note" for="bndZoom">上の 2 つの境界を描くのは（縮小時に描かないと軽くなります）</label>
+      <select id="bndZoom" style="width:auto">
+        <option value="0">いつでも</option>
+        <option value="9">ズーム 9 以上</option>
+        <option value="10" selected>ズーム 10 以上</option>
+        <option value="11">ズーム 11 以上</option>
+        <option value="12">ズーム 12 以上</option>
+      </select>
+    </div>
     <label class="check"><input type="checkbox" id="showClosed" checked> 廃駅も含める</label>
   </div>
 
@@ -405,7 +415,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const ms = performance.now() - t0;
     const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), fillColor: st.style.sel.color, fillOpacity: 0.16, interactive: false });
     poly.addTo(regionLayer);
-    if (fly) map.fitBounds(poly.getBounds(), { padding: [40, 40], maxZoom: 13 });
+    if (fly && !st.bootView) map.fitBounds(poly.getBounds(), { padding: [40, 40], maxZoom: 13 });
     const area = sphericalArea(R.latlng);
     $("selbox").innerHTML =
       `<div class="name">${esc(r[2])}<small>${esc(r[3])}${r[6] ? "・廃駅" : ""}</small>${isUa(st.sel) ? '<span class="badge">未取得</span>' : ""}</div>` +
@@ -744,7 +754,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   function drawView() {
     const job = ++st.viewJob; viewLayer.clearLayers();
-    if (!$("viewAll").checked) return;
+    if (!$("viewAll").checked || map.getZoom() < +$("bndZoom").value) return;
     const ids = stationsForView(st.k, 0.1);
     const CAP = 800, todo = ids.slice(0, CAP);
     let q = 0;
@@ -764,7 +774,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ~0.5 ms per station and cached, so panning around is cheap after the first pass.
   function drawVor() {
     const job = ++st.vorJob; vorLayer.clearLayers();
-    if (!$("vor1").checked) return;
+    if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) return;
     const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
     let q = 0;
     const step = () => {
@@ -839,6 +849,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("kn").addEventListener("change", () => setK($("kn").value));
   $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); drawVor(); });
   $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); drawVor(); });
+  $("bndZoom").addEventListener("change", () => {
+    try { localStorage.setItem("bndZoom", $("bndZoom").value); } catch (e) {}
+    drawVor(); drawView();
+  });
+  // keep the map position across reloads
+  map.on("moveend", () => { try { const c = map.getCenter(); localStorage.setItem("view", JSON.stringify([c.lat, c.lng, map.getZoom()])); } catch (e) {} });
   $("vor1").addEventListener("change", () => {
     try { localStorage.setItem("vor1", $("vor1").checked ? "1" : "0"); } catch (e) {}
     drawVor();
@@ -1070,11 +1086,16 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const PREF = ["", "北海道", "青森", "岩手", "宮城", "秋田", "山形", "福島", "茨城", "栃木", "群馬", "埼玉", "千葉", "東京", "神奈川", "新潟", "富山", "石川", "福井", "山梨", "長野", "岐阜", "静岡", "愛知", "三重", "滋賀", "京都", "大阪", "兵庫", "奈良", "和歌山", "鳥取", "島根", "岡山", "広島", "山口", "徳島", "香川", "愛媛", "高知", "福岡", "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島", "沖縄"];
 
   // ---------------- boot (restore #id=..&k=..&m=.. if present)
+  // read the saved view first: the moves made while booting would overwrite it
+  let savedView = null;
+  try { const v = JSON.parse(localStorage.getItem("view") || "null"); if (Array.isArray(v) && v.length === 3 && v.every(Number.isFinite)) savedView = v; } catch (e) {}
+  st.bootView = !!savedView; // while booting, selecting a station must not fly away from the saved view
   const hp = new URLSearchParams(location.hash.slice(1));
   if (hp.get("k")) { st.k = Math.max(1, Math.min(500, +hp.get("k") || 18)); $("kn").value = st.k; $("kr").value = Math.min(100, st.k); $("kout").textContent = st.k; }
   if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
   try {
     $("vor1").checked = localStorage.getItem("vor1") === "1";
+    const bz = localStorage.getItem("bndZoom"); if (bz !== null && [...$("bndZoom").options].some(o => o.value === bz)) $("bndZoom").value = bz;
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
     $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
     const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
@@ -1085,6 +1106,10 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   loadUa();
   loadRows(EMBED.rows, EMBED.version);
   if (hp.get("id")) { const i = st.rows.findIndex(r => r[0] === +hp.get("id")); if (i >= 0) select(i, true); }
+  // back to where the map was before the reload (overrides the fly-to of the selection above);
+  // without a saved view (first visit, another device) the selected station is shown as before
+  if (savedView) map.setView([savedView[0], savedView[1]], savedView[2], { animate: false });
+  st.bootView = false;
 })();
 </script>
 </body>
