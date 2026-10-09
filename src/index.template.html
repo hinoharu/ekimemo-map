@@ -17,10 +17,11 @@
   --rule: #dcdfe6;
   --region: #1f5fa8;
   --station: #c2410c;
-  /* BIZ UDPGothic (web font, universal-design) first; if it cannot load:
-     macOS/iOS → Hiragino, Windows 7+ → Meiryo (before Yu Gothic, which renders thin on Windows),
-     Android → Noto Sans CJK JP (the system sans-serif). */
-  --font-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic", sans-serif;
+  /* BIZ UDPGothic: web font from Google Fonts (also installed on Windows 10 1809+). If it cannot load:
+     macOS/iOS → Hiragino; Windows 7+ → Meiryo (both names; before Yu Gothic, which renders thin on Windows);
+     Android → Noto Sans CJK JP (system font; Droid Sans Japanese on old versions);
+     last resort on old Windows → MS PGothic. */
+  --font-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo", "メイリオ", "Noto Sans JP", "Noto Sans CJK JP", "Droid Sans Japanese", "Yu Gothic", "MS PGothic", "ＭＳ Ｐゴシック", sans-serif;
   --font-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   color-scheme: light;
 }

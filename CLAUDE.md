@@ -86,7 +86,7 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 - 現在地の点（`meR`）は駅の点より上の pane `me`（z-index 460、`pointer-events: none`）に置く。上に置かないと駅の点に隠れ、`pointer-events: none` がないと駅のタップを奪う。精度の円は `lineR` に描く。
 - 現在地の操作は地図右上のボタン（`geoCtl`）：「現在地を使う」の切り替え（オンの間は地図が追従し、手で動かすと 15 秒止まる）と「現在地へ移動」。追従の有無は `following()`（＝位置の監視中か）で決まる。
 - 「最寄り駅の境界を常に描く」（`drawVor`）：表示範囲の駅の R_1(s)（1 次ボロノイ）を k と無関係に描く。中心に近い 3,000 駅まで。設定は localStorage の `vor1` に保存する。
-- フォント：BIZ UDPゴシック（Google Fonts）。読み込めないときは Hiragino → メイリオ（Windows 7 以降）→ Noto Sans CJK JP（Android）の順。游ゴシックは Windows で細く見えるため後ろに置く。
+- フォント：BIZ UDPゴシック（Google Fonts から読み込む。Windows 10 1809 以降は端末にも入っている）。読み込めないときは Hiragino（Mac/iOS）→ メイリオ（Windows 7 以降。英名と和名の両方を指定）→ Noto Sans CJK JP（Android。古い版は Droid Sans Japanese）→ 游ゴシック → ＭＳ Ｐゴシックの順。游ゴシックは Windows で細く見えるためメイリオより後ろに置く。
 - 「1〜k 位の境界を重ねる」で二等分線がまっすぐ交差して見えるのは正しい表示。隣り合う R_j と R_{j+1} の境界は直線どうしの交点で入れ替わる（X 字に接する）ため、重ねると直線の配置そのものが見える。
 - 現在地：`watchPosition` → `setPosition` → `evaluate`。通知の判定には多角形を使わず、その地点での実際の順位（`rankAt`）を使う。描いた境界と判定が必ず一致する。
 - 設定を変えた直後は、基準を取り直すだけで通知は出さない（`track.prev = null`）。
