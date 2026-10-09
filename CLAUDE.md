@@ -82,7 +82,9 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 
 ## 画面側（src/index.template.html）の要点
 - `region(i, k)`：metric・clip・k・駅ごとに結果をキャッシュする。設定が変わったら `st.cache` を作り直す。
-- **描画の重なり順（消さないこと）**：`preferCanvas` では canvas レンダラーごとに地図全体を覆う `<canvas>` ができ、クリックを受け取れるのは一番上の canvas だけ。そこで駅の点（`canvasR`）は専用の pane `stations`（z-index 450）に置き、境界線（選択駅の領域・1〜k 位の境界・全駅の境界）はすべて `lineR`（overlayPane）に描く。境界を駅と同じ pane や後から作る canvas に描くと、駅をタップしても反応しなくなる。駅以外の所のクリックは下の地図に届く。
+- **描画の重なり順（消さないこと）**：`preferCanvas` では canvas レンダラーごとに地図全体を覆う `<canvas>` ができ、クリックを受け取れるのは一番上の canvas だけ。そこで駅の点（`canvasR`）は専用の pane `stations`（z-index 610。境界線より上、さらに駅名ラベルの markerPane 600 より上にして、ラベルが点＝タップの目標を隠さないようにする）に置き、境界線（選択駅の領域・1〜k 位の境界・全駅の境界）はすべて `lineR`（overlayPane）に描く。境界を駅と同じ pane や後から作る canvas に描くと、駅をタップしても反応しなくなる。駅以外の所のクリックは下の地図に届く。
+- 選択中の駅：点を大きくし、白い縁取りの輪（`placeSelRing`、点と同じ色）で囲む。輪は `interactive: false` なので、タップは下の点に届く。
+- 駅名ラベル（`updateLabels`）：駅名どうし・駅の点と重ならないように置く。選択中 → 未取得 → 画面中心に近い駅の順に、点のまわりの 8 か所の候補から最初に空いている所に置き、どこにも置けない駅名は省く（選択中の駅名は必ず出す）。幅は canvas の `measureText` で測る（Web フォントの読み込み後に置き直す）。
 - 現在地の点（`track.me`。アニメーションのため canvas ではなく divIcon のマーカー）は駅の点と駅名ラベル（markerPane 600）より上の pane `me`（z-index 640、`pointer-events: none`）に置く。位置を受け取って反映するたびに波紋が広がり（`pingMe`。`prefers-reduced-motion` では止める）、現在地を使っていないときは灰色になる。低いと駅の点やラベルの白い縁取りに隠れ、`pointer-events: none` がないと駅のタップを奪う。精度の円は `lineR` に描く。
 - 現在地の操作は地図右上の 3 つのボタン（`geoCtl`）とパネルの同じ項目（`geoUse` `geoFollow` `geoCenter`）：①現在地を使う（`geoOn()` ＝位置の監視中か）②常に中心に保つ（`geoFollow`、既定オン、localStorage に保存）③いますぐ現在地を中心に。追従するのは `following()` ＝①かつ②のとき。手で地図を動かしたときの扱いは `followPause`（0／5／15／30 秒止める、`off` ＝②をオフにする。既定 15 秒、localStorage に保存）。0 秒なら手を離した時点で戻す。ドラッグ中は戻さない。②がオフなら、①をオンにしても地図は動かない。「中心」はパネルに隠れていない部分の中心（`viewOffset` / `centerOn`。スマホは下のパネルより上、PC は左のパネルより右）。コンテナの中心だとスマホでは点がパネルの裏に隠れる。
 - 「最寄り駅の境界を常に描く」（`drawVor`）：画面にかかる R_1(s)（1 次ボロノイ）を k と無関係に描く。中心に近い 3,000 駅まで。
