@@ -149,6 +149,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
         <option value="30">30 秒ごと</option>
       </select>
     </div>
+    <label class="check"><input type="checkbox" id="autoZoom"> 現在地を使い始めたとき自動で拡大する（オフならズームはそのまま）</label>
     <label class="check"><input type="checkbox" id="nNear" checked> 最寄り駅が変わったら通知</label>
     <label class="check"><input type="checkbox" id="nSet"> レーダー k 駅の顔ぶれが変わったら通知</label>
     <label class="check"><input type="checkbox" id="nSel" checked> 選んだ駅の圏内に出入りしたら通知</label>
@@ -441,7 +442,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const first = !track.precise && !track.lastFix;
     track.lastFix = now; if (!quick) track.precise = true;
     setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false);
-    if (first) map.setView([p.coords.latitude, p.coords.longitude], Math.max(map.getZoom(), 14));
+    if (first && $("autoZoom").checked) map.setView([p.coords.latitude, p.coords.longitude], Math.max(map.getZoom(), 14));
   }
   function startGeo() {
     if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; return; }
@@ -465,6 +466,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       },
       { enableHighAccuracy: true, maximumAge: geoRate() * 1000, timeout: 20000 });
   }
+  $("autoZoom").addEventListener("change", () => { try { localStorage.setItem("autoZoom", $("autoZoom").checked ? "1" : "0"); } catch (e) {} });
   $("geoRate").addEventListener("change", () => {
     try { localStorage.setItem("geoRate", $("geoRate").value); } catch (e) {}
     if (following()) { navigator.geolocation.clearWatch(track.watch); track.precise = false; watchGeo(); }
@@ -761,6 +763,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
   try {
     $("vor1").checked = localStorage.getItem("vor1") === "1";
+    $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
   } catch (e) {}
   buildStyleBox();
