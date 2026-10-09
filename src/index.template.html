@@ -37,7 +37,9 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   .panel { left: 8px; right: 8px; width: auto; top: auto; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-height: 48%; }
 }
 .panel.collapsed > :not(.head) { display: none; }
-.head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  /* stays visible while the panel scrolls (top = -panel padding) */
+  position: sticky; top: -14px; z-index: 6; background: var(--paper); margin: -14px -16px 0; padding: 14px 16px 6px; }
 h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: 0.04em; }
 .head button { border: none; background: none; color: var(--muted); font: inherit; cursor: pointer; padding: 2px 4px; }
 .field { display: grid; gap: 5px; }
@@ -87,6 +89,13 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 .log li { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
 .log time { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.sub { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 8px; }
+details.sub > summary { cursor: pointer; font-size: 12px; letter-spacing: 0.1em; color: var(--muted); }
+details.sub[open] > summary { margin-bottom: 4px; }
+.sty { display: grid; gap: 3px; font-size: 12.5px; }
+.sty .ctl { display: grid; grid-template-columns: 34px 74px 1fr 64px; gap: 6px; align-items: center; }
+.sty input[type=color] { width: 34px; height: 28px; padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: #fff; }
+.sty select { padding: 4px 6px; font-size: 12px; }
 /* location buttons on the map (Leaflet control, under the zoom buttons) */
 .geo-ctl a { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; line-height: 0; color: var(--ink); cursor: pointer; }
 .geo-ctl a svg { width: 20px; height: 20px; }
@@ -119,50 +128,67 @@ input[type=range] { width: 100%; accent-color: var(--region); }
   </div>
 
   <div class="field">
-    <label class="label" for="metric">距離の測り方</label>
-    <select id="metric">
-      <option value="flat" selected>緯度・経度をそのまま平面とみなす</option>
-      <option value="cos">平面・経度を cos 36° で縮める</option>
-      <option value="sphere">球面（大圏距離）</option>
-    </select>
-  </div>
-
-  <div class="field">
-    <label class="label" for="clip">計算範囲（駅からの四角い窓）</label>
-    <select id="clip">
-      <option value="1">±1°（約100 km）</option>
-      <option value="3" selected>±3°（約300 km）</option>
-      <option value="10">±10°</option>
-      <option value="0">全国の枠（遅くなります）</option>
-    </select>
-  </div>
-
-  <div class="field">
-    <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
     <label class="check"><input type="checkbox" id="vor1"> 最寄り駅の境界を常に描く（1 次ボロノイ図・位置登録される駅の範囲）</label>
+    <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき）</label>
+    <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
     <label class="check"><input type="checkbox" id="viewAll"> 表示中の全駅の境界を描く（k 次ボロノイ図）</label>
     <label class="check"><input type="checkbox" id="showClosed" checked> 廃駅も含める</label>
-    <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき）</label>
   </div>
 
   <div class="sel" id="selbox"></div>
 
   <div class="geo">
     <div class="label">現在地と通知</div>
+    <div class="note">地図右上のボタンで、現在地を使う（地図が現在地に追従する）かどうかの切り替えと、現在地への移動ができます。手で地図を動かすと 15 秒間は追従を止めます。</div>
+    <div class="field">
+      <label class="label" for="geoRate">位置の更新</label>
+      <select id="geoRate">
+        <option value="0" selected>最速（新しい位置が届くたび）</option>
+        <option value="3">3 秒ごと</option>
+        <option value="10">10 秒ごと</option>
+        <option value="30">30 秒ごと</option>
+      </select>
+    </div>
     <label class="check"><input type="checkbox" id="nNear" checked> 最寄り駅が変わったら通知</label>
     <label class="check"><input type="checkbox" id="nSet"> レーダー k 駅の顔ぶれが変わったら通知</label>
     <label class="check"><input type="checkbox" id="nSel" checked> 選んだ駅の圏内に出入りしたら通知</label>
     <div class="row"><button class="btn" id="notifPerm">端末の通知を許可する</button></div>
-    <div class="note">地図右上のボタンで、現在地を使う（地図が現在地に追従する）かどうかの切り替えと、現在地への移動ができます。手で地図を動かすと 15 秒間は追従を止めます。</div>
     <div class="status" id="geoStatus">現在地は使っていません。</div>
     <ol class="log" id="log" aria-live="polite"></ol>
-    <div class="note">テスト用：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします。</div>
   </div>
 
-  <div class="field">
+  <details class="sub" id="styleSec">
+    <summary>線の見た目（色・太さ・濃さ・線の種類）</summary>
+    <div id="styleBox" style="display:grid;gap:10px"></div>
+    <div><button class="btn" id="styleReset">既定に戻す</button></div>
+  </details>
+
+  <div class="sub">
+    <div class="label">計算の設定</div>
+    <div class="field">
+      <label class="label" for="metric">距離の測り方</label>
+      <select id="metric">
+        <option value="flat" selected>緯度・経度をそのまま平面とみなす</option>
+        <option value="cos">平面・経度を cos 36° で縮める</option>
+        <option value="sphere">球面（大圏距離）</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="label" for="clip">計算範囲（駅からの四角い窓）</label>
+      <select id="clip">
+        <option value="1">±1°（約100 km）</option>
+        <option value="3" selected>±3°（約300 km）</option>
+        <option value="10">±10°</option>
+        <option value="0">全国の枠（遅くなります）</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="sub">
     <div class="note" id="datainfo"></div>
     <div><button class="btn" id="refresh">GitHub から最新データを取得</button></div>
-    <div class="note">地図の何もない所をクリックすると、その地点のレーダー順位を表示します。</div>
+    <label class="check"><input type="checkbox" id="dbgRank"> デバッグ：地図の駅以外をクリックすると、その地点のレーダー順位を表示する</label>
+    <div class="note">テスト用：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします。</div>
   </div>
 </section>
 
@@ -251,6 +277,29 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     });
   }
 
+  // ---------------- line styles (per boundary kind; saved per browser)
+  const STYLE_KINDS = [
+    ["sel", "選んだ駅の範囲"], ["vor", "最寄り駅の境界"], ["view", "全駅の境界（k 次）"], ["lv", "1〜k 位の境界"],
+  ];
+  const STYLE_DEFAULT = {
+    sel: { color: "#1f5fa8", weight: 2, opacity: 1, dash: "solid" },
+    vor: { color: "#7a3b8f", weight: 1, opacity: 0.6, dash: "solid" },
+    view: { color: "#3b4660", weight: 0.8, opacity: 0.45, dash: "solid" },
+    lv: { color: "#1f5fa8", weight: 1, opacity: 0.75, dash: "solid" }, // inner levels drawn darker, outer down to 1/3
+  };
+  const cloneStyle = (o) => JSON.parse(JSON.stringify(o));
+  st.style = cloneStyle(STYLE_DEFAULT);
+  try {
+    const saved = JSON.parse(localStorage.getItem("lineStyle") || "{}");
+    for (const [k] of STYLE_KINDS) if (saved[k]) Object.assign(st.style[k], saved[k]);
+  } catch (e) {}
+  function lineStyle(kind) {
+    const s = st.style[kind], w = +s.weight;
+    const dashArray = s.dash === "dashed" ? `${4 * w + 2} ${3 * w + 2}` : s.dash === "dotted" ? `0.1 ${2.5 * w + 2}` : null;
+    return { color: s.color, weight: w, opacity: +s.opacity, dashArray, lineCap: "round" };
+  }
+  const lvOpacity = (f) => 1 - (2 / 3) * f; // f = j / k
+
   // ---------------- region computation (cached)
   function region(i, k) {
     const key = `${st.metric}|${st.clip}|${k}|${i}`;
@@ -276,7 +325,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const t0 = performance.now();
     const R = region(st.sel, st.k);
     const ms = performance.now() - t0;
-    const poly = L.polygon(R.latlng, { renderer: lineR, color: "#1f5fa8", weight: 2, fillColor: "#1f5fa8", fillOpacity: 0.16, interactive: false });
+    const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), fillColor: st.style.sel.color, fillOpacity: 0.16, interactive: false });
     poly.addTo(regionLayer);
     if (fly) map.fitBounds(poly.getBounds(), { padding: [40, 40], maxZoom: 13 });
     const area = sphericalArea(R.latlng);
@@ -313,7 +362,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("showNames").addEventListener("change", updateLabels);
 
   // ---------------- current position, tracking and notifications
-  const track = { pos: null, watch: null, prev: null, lastUser: 0, me: null, acc: null };
+  const track = { pos: null, watch: null, prev: null, lastUser: 0, me: null, acc: null, lastFix: 0, precise: false };
   map.on("dragstart", () => { track.lastUser = Date.now(); });
 
   function rankAt(lat, lng) {
@@ -383,21 +432,43 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   // using the location = following it (paused for 15 s after the user drags the map)
   const following = () => track.watch !== null;
+  // geoRate: minimum seconds between applied updates (0 = every fix, never older than the fix itself)
+  const geoRate = () => +$("geoRate").value;
+  function onFix(p, quick) {
+    const now = Date.now();
+    if (quick && track.precise) return; // the quick coarse fix arrived after a precise one
+    if (!quick && track.precise && now - track.lastFix < geoRate() * 1000 - 200) return;
+    const first = !track.precise && !track.lastFix;
+    track.lastFix = now; if (!quick) track.precise = true;
+    setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false);
+    if (first) map.setView([p.coords.latitude, p.coords.longitude], Math.max(map.getZoom(), 14));
+  }
   function startGeo() {
     if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; return; }
-    track.lastUser = 0;
+    track.lastUser = 0; track.lastFix = 0; track.precise = false;
     if (!window.isSecureContext) $("geoStatus").textContent = "https か localhost で開いていないため、現在地を取得できない可能性があります。";
     else $("geoStatus").textContent = "現在地を取得しています…";
+    if (track.pos && !track.pos.simulated) map.panTo([track.pos.lat, track.pos.lng]); // last known, right away
+    // a quick (possibly cached / network-based) fix first, then the precise watch below takes over
+    navigator.geolocation.getCurrentPosition((p) => { if (following()) onFix(p, true); }, () => {},
+      { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 });
+    watchGeo();
+    geoCtl.update();
+  }
+  function watchGeo() {
     track.watch = navigator.geolocation.watchPosition(
-      (p) => setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false),
+      (p) => onFix(p, false),
       (err) => {
         const why = err.code === 1 ? "位置情報の利用が許可されていません。ブラウザの設定で許可してください。"
                   : err.code === 2 ? "現在地を特定できませんでした。" : "現在地の取得がタイムアウトしました。しばらく待つと再試行します。";
         $("geoStatus").textContent = why + (window.isSecureContext ? "" : "（https か localhost で開く必要があります）");
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
-    geoCtl.update();
+      { enableHighAccuracy: true, maximumAge: geoRate() * 1000, timeout: 20000 });
   }
+  $("geoRate").addEventListener("change", () => {
+    try { localStorage.setItem("geoRate", $("geoRate").value); } catch (e) {}
+    if (following()) { navigator.geolocation.clearWatch(track.watch); track.precise = false; watchGeo(); }
+  });
   function stopGeo() {
     if (track.watch !== null) navigator.geolocation.clearWatch(track.watch);
     track.watch = null;
@@ -456,7 +527,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       while (j < K && performance.now() - t < 24) {
         const R = region(i, j);
         const f = j / K;
-        L.polygon(R.latlng, { renderer: lineR, color: "#1f5fa8", weight: 1, opacity: 0.25 + 0.5 * (1 - f), fill: false, interactive: false }).addTo(levelLayer);
+        const ls = lineStyle("lv"), pl = L.polygon(R.latlng, { renderer: lineR, ...ls, opacity: ls.opacity * lvOpacity(f), fill: false, interactive: false });
+        pl.levelF = f; pl.addTo(levelLayer);
         j++;
       }
       if (j < K) setTimeout(step, 0);
@@ -478,7 +550,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       if (job !== st.viewJob) return;
       const t = performance.now(), batch = [];
       while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], st.k).latlng); q++; }
-      if (batch.length) L.polygon(batch, { renderer: lineR, color: "#3b4660", weight: 0.8, opacity: 0.45, fill: false, interactive: false }).addTo(viewLayer);
+      if (batch.length) L.polygon(batch, { renderer: lineR, ...lineStyle("view"), fill: false, interactive: false }).addTo(viewLayer);
       if (q < todo.length) setTimeout(step, 0);
     };
     step();
@@ -501,7 +573,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       if (job !== st.vorJob) return;
       const t = performance.now(), batch = [];
       while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], 1).latlng); q++; }
-      if (batch.length) L.polygon(batch, { renderer: lineR, color: "#7a3b8f", weight: 1, opacity: 0.6, fill: false, interactive: false }).addTo(vorLayer);
+      if (batch.length) L.polygon(batch, { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
       if (q < todo.length) setTimeout(step, 0);
     };
     step();
@@ -510,6 +582,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   // ---------------- ranking at a clicked point
   map.on("click", (e) => {
+    if (!$("dbgRank").checked) return; // debug tool, off by default
     const { lat, lng } = e.latlng, n = st.rows.length;
     const K = Math.max(st.k, 5), top = [];
     let selKey = st.sel >= 0 ? distKey(st.idx, st.metric, lat, lng, st.sel) : null, selRank = 1;
@@ -647,6 +720,38 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       (r[ci.closed] === "1" || r[ci.closed] === "true") ? 1 : 0, +r[ci.pref]]);
   }
 
+  // ---------------- line style editor
+  function buildStyleBox() {
+    const W = [0.5, 0.8, 1, 1.5, 2, 3, 4, 6];
+    $("styleBox").innerHTML = STYLE_KINDS.map(([k, name]) => {
+      const s = st.style[k];
+      return `<div class="sty" data-k="${k}"><div>${name}</div><div class="ctl">` +
+        `<input type="color" data-p="color" value="${s.color}" aria-label="${name}の色">` +
+        `<select data-p="weight" aria-label="${name}の太さ">${W.map(w => `<option value="${w}"${+s.weight === w ? " selected" : ""}>${w} px</option>`).join("")}</select>` +
+        `<input type="range" data-p="opacity" min="0.05" max="1" step="0.05" value="${s.opacity}" aria-label="${name}の濃さ" title="濃さ">` +
+        `<select data-p="dash" aria-label="${name}の線の種類">` +
+        [["solid", "実線"], ["dashed", "破線"], ["dotted", "点線"]].map(([v, t]) => `<option value="${v}"${s.dash === v ? " selected" : ""}>${t}</option>`).join("") +
+        `</select></div></div>`;
+    }).join("");
+  }
+  function restyle(kind) {
+    const ls = lineStyle(kind);
+    if (kind === "sel") regionLayer.eachLayer(l => l.setStyle({ ...ls, fillColor: ls.color }));
+    if (kind === "vor") vorLayer.eachLayer(l => l.setStyle(ls));
+    if (kind === "view") viewLayer.eachLayer(l => l.setStyle(ls));
+    if (kind === "lv") levelLayer.eachLayer(l => l.setStyle({ ...ls, opacity: ls.opacity * lvOpacity(l.levelF) }));
+  }
+  const saveStyle = () => { try { localStorage.setItem("lineStyle", JSON.stringify(st.style)); } catch (e) {} };
+  $("styleBox").addEventListener("input", (e) => {
+    const el = e.target, box = el.closest(".sty"); if (!box || !el.dataset.p) return;
+    st.style[box.dataset.k][el.dataset.p] = el.value;
+    restyle(box.dataset.k); saveStyle();
+  });
+  $("styleReset").addEventListener("click", () => {
+    st.style = cloneStyle(STYLE_DEFAULT); saveStyle(); buildStyleBox();
+    for (const [k] of STYLE_KINDS) restyle(k);
+  });
+
   const METRIC_NAME = { flat: "緯度経度の平面", cos: "cos 36° 補正の平面", sphere: "球面" };
   const PREF = ["", "北海道", "青森", "岩手", "宮城", "秋田", "山形", "福島", "茨城", "栃木", "群馬", "埼玉", "千葉", "東京", "神奈川", "新潟", "富山", "石川", "福井", "山梨", "長野", "岐阜", "静岡", "愛知", "三重", "滋賀", "京都", "大阪", "兵庫", "奈良", "和歌山", "鳥取", "島根", "岡山", "広島", "山口", "徳島", "香川", "愛媛", "高知", "福岡", "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島", "沖縄"];
 
@@ -654,7 +759,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const hp = new URLSearchParams(location.hash.slice(1));
   if (hp.get("k")) { st.k = Math.max(1, Math.min(500, +hp.get("k") || 18)); $("kn").value = st.k; $("kr").value = Math.min(100, st.k); $("kout").textContent = st.k; }
   if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
-  try { $("vor1").checked = localStorage.getItem("vor1") === "1"; } catch (e) {}
+  try {
+    $("vor1").checked = localStorage.getItem("vor1") === "1";
+    const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
+  } catch (e) {}
+  buildStyleBox();
   loadRows(EMBED.rows, EMBED.version);
   if (hp.get("id")) { const i = st.rows.findIndex(r => r[0] === +hp.get("id")); if (i >= 0) select(i, true); }
 })();
