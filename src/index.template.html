@@ -58,6 +58,11 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 #nearBox .ua { display: inline-block; margin-left: 5px; font-size: 9.5px; padding: 0 5px; border-radius: 3px; background: var(--ua); vertical-align: 3px; }
 @media (min-width: 641px) { #nearBox { left: 380px; } }
 /* "a new version is out" bar (the service worker of a newer build took over) */
+#toast { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 10px; background: #1d2433; color: #fff; padding: 8px 14px; border-radius: 4px; font-size: 13px;
+  width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); }
+#toast[hidden] { display: none; }
+#toast button { font: inherit; font-weight: 700; border: none; border-radius: 4px; background: #fff; color: #1d2433; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
 #updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 8px; background: #1d2433; color: #fff; padding: 6px 6px 6px 14px; border-radius: 6px;
   font-size: 13px; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); white-space: nowrap; }
@@ -241,7 +246,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
       <button class="btn" id="uaClear">すべて消す</button>
       <input type="file" id="uaFile" accept=".csv,text/csv" hidden>
     </div>
-    <div class="note">「駅名」の列がある CSV を読み込みます（「メモ本文」の列があれば ❌ の行だけを未取得とみなします）。「CSV に書き出す」で保存したものも読み込めます。地図の駅を<b>長押し</b>（PC では右クリック）すると、取得済み／未取得を切り替えられます。データはこのブラウザの中にだけ保存します。</div>
+    <div class="note">「駅名」の列がある CSV を読み込みます（「メモ本文」の列があれば ❌ の行だけを未取得とみなします）。「CSV に書き出す」で保存したものも読み込めます。タップで<b>選んだ駅を長押し</b>（PC では右クリック）すると、取得済み／未取得を切り替えられます（選んでいない駅の長押しは指定位置になります。切り替えた直後は「元に戻す」で取り消せます）。データはこのブラウザの中にだけ保存します。</div>
     <div class="note" id="uaInfo"></div>
     <label class="check"><input type="checkbox" id="uaArea1"> 未取得駅を位置登録で取れる範囲を塗る（最寄り駅になる範囲）</label>
     <label class="check"><input type="checkbox" id="uaAreaK"> 未取得駅をレーダーで取れる範囲を塗る（k 位以内に入る範囲）</label>
@@ -289,7 +294,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <label class="check"><input type="checkbox" id="nearOn"> 最寄り駅を画面の隅に常に表示する</label>
     <label class="check"><input type="checkbox" id="radarMarks"> 現在地・指定位置からレーダーに入る k 駅に順位の番号を付ける</label>
     <label class="check" style="margin-left:22px"><input type="checkbox" id="stnMarks"> 位置登録した駅から数えた k 駅のうち、上に入らない駅も示す（四角い番号）</label>
-    <div class="note">指定位置：地図の駅以外の所を長押し（PC は右クリック）した地点。三重表示がオンのときは、番号の色を k−6 位まで・k−2 位まで・k 位までの 3 段階に分けます。</div>
+    <div class="note">指定位置：地図を長押し（PC は右クリック）した地点（選んでいる駅の上を除く）。三重表示がオンのときは、番号の色を k−6 位まで・k−2 位まで・k 位までの 3 段階に分けます。</div>
     <div class="status" id="geoStatus">現在地は使っていません。</div>
     <ol class="radar" id="radarList" hidden></ol>
     <ol class="log" id="log" aria-live="polite"></ol>
@@ -382,7 +387,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <div class="note" id="datainfo"></div>
     <div><button class="btn" id="refresh">GitHub から最新データを取得</button></div>
     <label class="check"><input type="checkbox" id="dbgRank"> デバッグ：地図の駅以外をクリックすると、その地点のレーダー順位を表示する</label>
-    <div class="note">指定位置：地図の駅以外の所を右クリック（スマホでは長押し）すると、その地点を現在地とみなします。</div>
+    <div class="note">指定位置：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
   </div>
 </section>
 
@@ -1218,8 +1223,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   });
   map.on("contextmenu", (e) => {
     const i = hitStation(e.layerPoint);
-    // long press (touch) / right click on a station: toggle acquired <-> unacquired; elsewhere: test position
-    if (i >= 0) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
+    // long press (touch) / right click on the SELECTED station: toggle acquired <-> unacquired (undoable for a few
+    // seconds). Anywhere else, other stations included: a designated position (long presses meant for a position kept
+    // landing on a nearby station and flipping it by accident)
+    if (i >= 0 && i === st.sel) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
+    L.DomEvent.preventDefault(e.originalEvent);
     // a designated position: stop using the location (its next fix would overwrite this). "Follow" is kept as it is:
     // it does nothing while the location is off, and turning the location back on is then one tap
     if (geoOn()) stopGeo();
@@ -1351,12 +1359,17 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   let toastTimer;
-  function toast(msg) {
+  // a short message at the bottom; with action = [label, fn], also a button (e.g. undo) until it disappears
+  function toast(msg, action, ms) {
     let el = document.getElementById("toast");
-    if (!el) { el = document.createElement("div"); el.id = "toast"; el.setAttribute("role", "status");
-      el.style.cssText = "position:fixed;z-index:1100;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:#1d2433;color:#fff;padding:8px 14px;border-radius:4px;font-size:13px;max-width:90%;";
-      document.body.appendChild(el); }
-    el.textContent = msg; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 4000);
+    if (!el) { el = document.createElement("div"); el.id = "toast"; el.setAttribute("role", "status"); document.body.appendChild(el); }
+    el.textContent = msg;
+    if (action) {
+      const b = document.createElement("button"); b.textContent = action[0];
+      b.addEventListener("click", () => { el.hidden = true; clearTimeout(toastTimer); action[1](); });
+      el.appendChild(b);
+    }
+    el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms || 4000);
   }
 
   // ---------------- controls
@@ -1544,11 +1557,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function saveUa() { try { localStorage.setItem("unacq", JSON.stringify([...st.ua])); } catch (e) {} }
   function loadUa() { try { st.ua = new Map(JSON.parse(localStorage.getItem("unacq") || "[]")); } catch (e) { st.ua = new Map(); } }
   function toggleUa(i) {
-    const name = st.rows[i][2], was = st.ua.has(name);
+    const name = st.rows[i][2], was = st.ua.has(name), stamp = st.ua.get(name);
     if (was) st.ua.delete(name); else st.ua.set(name, nowStamp());
-    saveUa();
-    toast(was ? `${name} を取得済みにしました（もう一度長押しで戻せます）` : `${name} を未取得にしました`);
-    drawDots();
+    uaApplied(i);
+    // undo for UNDO_MS: back to the state before, with the original "made unacquired" time
+    toast(was ? `${name} を取得済みにしました` : `${name} を未取得にしました`, ["元に戻す", () => {
+      if (was) st.ua.set(name, stamp); else st.ua.delete(name);
+      uaApplied(i); toast(`${name} を${was ? "未取得" : "取得済み"}に戻しました`);
+    }], UNDO_MS);
+  }
+  const UNDO_MS = 8000;
+  function uaApplied(i) {
+    saveUa(); drawDots();
     if (i === st.sel) { redraw(false); uaChanged(false); } else uaChanged(true); // redraw() redraws the areas
   }
   // after the set changed: labels, areas, list, radar baseline (no notification for our own edit)
