@@ -205,8 +205,9 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   map.createPane("stations").style.zIndex = 450;
   const canvasR = L.canvas({ pane: "stations", padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
   const lineR = L.canvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
-  // current-position dot: above the station dots, but click-through so it never hides them from taps
-  const mePane = map.createPane("me"); mePane.style.zIndex = 460; mePane.style.pointerEvents = "none";
+  // current-position dot: above the station dots and name labels (markerPane 600; tooltips 650 and
+  // popups 700 stay on top), click-through so it never hides the stations from taps
+  const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
   const meR = L.canvas({ pane: "me", padding: 0.3 });
   const stationLayer = L.layerGroup().addTo(map);
   const vorLayer = L.layerGroup().addTo(map);
