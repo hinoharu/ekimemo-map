@@ -25,6 +25,7 @@
 | `tests/verify.js` | 総当たりの順位計算と照合する正しさのテスト＋速度表示 |
 | `tests/check_html.js` | ビルド結果のプレースホルダ残りと、インラインスクリプトの構文チェック |
 | `.github/workflows/pages.yml` | push 時にビルド→テスト→公開。週1回は最新データを取得して公開 |
+| `HANDOFF.md` | 作業の引き継ぎメモ（現在の状況・これまでの PR・計測値・残課題）。こまめに更新する |
 
 `dist/`（`index.html` と `lines.json`）と `build/` は生成物です。手で編集せず、コミットもしません。
 
@@ -84,6 +85,7 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 ## 画面側（src/index.template.html）の要点
 - `region(i, k)`：metric・clip・k・駅ごとに結果をキャッシュする（`st.cache`。選んだ駅の範囲など、その場で 1 つだけ必要なときに使う）。駅データが変わったら作り直す。
 - **多数の範囲の計算は Web Worker で行う**（`regionsAsync(ch, [[駅, k], ...], onBatch)`）：最寄り駅の境界（`vor`）・全駅の境界（`view`）・1〜k 位の境界（`lv`）・未取得駅の範囲（`ua1` `uaK`）。Worker はページに埋め込んだ `station_core.js`（`<script id="core-src">`）をそのまま Blob から読み込む。結果は約 30 ms 分ずつ返り、こちらで `st.lcache`（緯度経度のみ）に溜める。同じチャンネルの新しい依頼が来たら古い依頼は捨てる（`cancelAsync`）。駅データが変わったら `st.gen` を進めて Worker にデータを送り直す。Worker が使えない環境では同じ依頼をこのスレッドで小分けに計算する。各描画関数は自分のジョブ番号（`st.vorJob` など）で古い結果を無視する。
+- **小さな移動では描き直さない（軽さの要。消さないこと）**：canvas の描画（駅の点 `DotCanvas`・鉄道 `RailCanvas`・境界線 `lineR`・未取得駅の範囲）は `StickyCanvas`（`L.Canvas` の `_update` を上書き）で、ズームが同じで前回描いた範囲（画面の外側 30% まで）が画面を覆っている間は、`moveend` で何もしない。駅名の canvas（`updateLabelsOnMove`）、最寄り駅の境界・全駅の境界（`coveredBy(st.vorDrawn / st.viewDrawn)`）も同じ考え方で、前回の範囲内の移動では計算も描画もしない。未取得駅の一覧はパネルが開いている間だけ作り直す。駅名の canvas の解像度は最大 2 倍。全表示オン・スマホ相当の速さで、80 px の移動 1 回の処理が約 0.5 秒 → 約 0.09 秒になった。
 - **駅の点（消さないこと）**：9,372 駅を Leaflet のオブジェクトにせず、レイヤーを持たない `L.Canvas` を拡張した `DotCanvas`（`dotR`）の `_draw` で自前に描く（`drawDots`）。Leaflet が canvas の大きさ・位置・ズームのアニメーションを受け持ち、移動のたびに canvas を消して `_draw` を呼ぶ（`update` イベントで描くと、直後に Leaflet が消してしまう）。描く範囲内の駅だけを、見た目ごとにまとめて 1 本の path で描く。Leaflet の非公開の `_ctx` `_bounds` を使うので、Leaflet の版を上げるときは要確認。
   - 操作：駅の点の pane（`stations`、z-index 610）は `pointer-events: none`。タップ・長押し（右クリック）・マウスを乗せたときは、地図のイベントの座標から一番近い点（半径＋8 px 以内）を探す（`hitStation`）。タップ＝選択、長押し＝取得済み／未取得の切り替え、点以外の長押し＝テスト位置、マウスを乗せる＝駅名の吹き出しとポインタ。
   - 重なり順：境界線（`lineR`、overlayPane 400）→ 駅名（`names` 600）→ 駅の点（610）→ 現在地（640）。点がいちばん上なので、駅名や境界に隠れない。
@@ -121,7 +123,48 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 4. 外部ライブラリを増やすときは、cdnjs のバージョン固定の URL を使い、理由をコミットメッセージに書く。
 5. UI の文言は日本語。ユーザーに見える用語は「レーダー」「圏内／圏外」「最寄り駅」などで揃える。
 6. 大きな方針変更（データ形式、距離方式の既定値、ファイル構成）は、実装の前にユーザーに確認する。
-7. ユーザーへの出力（報告・質問・進捗の説明・コマンドの説明・コミットメッセージ・PR の本文）は、常に日本語で書く。コード中の識別子やコメントは既存の書き方に合わせる。
+7. **ユーザーへの出力はすべて日本語**（報告・質問・作業途中の短いコメント・コマンドの説明・コミットメッセージ・PR の本文・GitHub のコメント）。途中経過の一言（「ビルドします」「確認します」など）も日本語。英語が混ざったとユーザーから 3 回指摘されている。コード中の識別子やコメントは既存の書き方（英語）に合わせてよい。
+8. 作業の状況・判断の経緯は `HANDOFF.md` にこまめに書く（会話の文脈が要約・圧縮されても引き継げるように）。PR を作る・マージする・方針が決まるたびに更新する。
+
+## 応対・運用のルール（チャット）
+会話の文脈が途中で要約されても同じ応対を続けられるよう、ここに書いておく。現在の作業状況は `HANDOFF.md`。
+
+### 言語と書き方
+- すべて日本語（上の 7）。作業の合間のコメントも日本語で、短く。
+- 報告は結論から。「変更内容」「確認したこと」「確認できていないこと」を分けて書く。測定値は条件（スマホ相当＝幅 412×860・CPU 4 倍遅く、など）と一緒に出す。
+- PR は `[hinoharu/ekimemo-map#番号](https://github.com/hinoharu/ekimemo-map/pull/番号)` の形で書く。
+- 失敗や手違い（例：書き換えに失敗したままコミットした）は、隠さず報告して次のコミットで直す。
+
+### 作業の流れ
+1. main の最新から作業ブランチ `claude/dazzling-johnson-pmcvrg` を作り直す（`git fetch origin main && git checkout -B claude/dazzling-johnson-pmcvrg origin/main`。マージ済みのブランチに積み上げない）。
+2. `src/` を直す → `npm run build && npm test`（全ケース不一致 0）→ 画面の変更はヘッドレス Chromium で確認（下記）。
+3. コミット（日本語のメッセージ、末尾に Co-Authored-By と Claude-Session の行）→ `git push -u origin claude/dazzling-johnson-pmcvrg`。
+4. PR を作り（GitHub の MCP ツール。`gh` は使えない）、内容と確認結果を日本語で報告して「マージしてよいですか」と聞く。
+5. **マージはユーザーが「マージして」と言った PR だけ**（承認はその PR 限り。次の PR には及ばない）。マージは GitHub の MCP ツールで、`merge_method: merge`、`expectedHeadSha` を付ける。
+6. マージ後は公開（GitHub Actions → Pages、約 30〜40 秒）を待つ。公開の成否は確認できたときだけ「成功」と言う。
+- PR の見守り（subscribe）はユーザーが不要と言っている（個人のプロジェクト）。
+- サブエージェント（sonnet / haiku）はトークン効率が良いときに使ってよい（ユーザーの指示）。
+
+### 画面の確認方法（この環境の制約）
+- この環境からは cdnjs・地図タイル（OSM・地理院・OpenRailwayMap）・wiki.openstreetmap.org に接続できない。Google Fonts と raw.githubusercontent.com は使える。
+- Leaflet は `npm pack leaflet@1.9.4` を作業用フォルダ（scratchpad）に展開し、Playwright（`/opt/node-tools/node_modules/playwright`、Chromium は導入済み。`playwright install` はしない）の `page.route` で `leaflet.min.js` / `.css` を差し替える。タイルは要求先を記録して代わりの画像を返す。`lines.json` も route で返す。
+- 内部の変数を見るときは、作業用にコピーした HTML の `// ---------------- boot` の前に `window.__app = { map, st, ... }` を差し込む（`dist/` は書き換えない）。
+- 測定の注意：`page.evaluate` で Leaflet のメソッドの戻り値（map オブジェクト）を返すと、そのシリアライズに数秒かかって測定が狂う。`() => { map.setZoom(...); }` のように何も返さない。
+- スマホ表示ではパネルが最初は畳まれている。操作するときは開くか、`dispatchEvent` で値を変える。
+- ユーザーの実データ（未取得駅の CSV など）はリポジトリに入れない。テストには架空のデータを使う。
+
+### ユーザーの好みと、これまでの判断
+- **軽さ最優先**（スマホで快適に）。重くなる機能は入れない・オプションにする。
+- 駅名はできるだけ多く・広い範囲で出したい。省略（間引き）はしない。重なりは許容する。重なりを避ける配置は重かったので不採用。
+- 駅の点（タップの目標）は何にも隠れないこと。選択中の駅は細い二重丸で囲む。
+- 実運用ではズーム固定が便利（自動ズームは既定オフ）。追従は「①現在地を使う ②常に中心に ③いますぐ中心に」の 3 ボタン。
+- 背景は淡めが好み。鉄道はラインカラーで描く（自前の描画。駅名・橋梁などは不要）。OpenRailwayMap は選択肢として残す。
+- 大きな方針変更（データ形式・ファイル構成・既定値）は実装の前に相談する（作業のルール 6）。
+
+### ユーザーの環境（最初の引き継ぎより）
+- 開発 PC は Windows（PowerShell 5.1、古いコンソール）。`[Console]::OutputEncoding` を UTF-8 に変えると表示エラー 0x1F になるので変えない。
+- Git Credential Manager のブラウザ認証が TLS エラーで失敗する。push には repo と workflow 権限付きの classic トークンを使う。認証で失敗したら自分で回避策を試さず、ユーザーに知らせる。
+- 公開先：https://hinoharu.github.io/ekimemo-map/ （Pages の Source は GitHub Actions、main への push で公開）。
 
 ## 既知の制限・今後の候補
 - スマホのブラウザでは、バックグラウンドに回ると位置の更新と通知が止まる（Web の制約）。
