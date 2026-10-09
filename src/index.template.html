@@ -17,6 +17,8 @@
   --rule: #dcdfe6;
   --region: #1f5fa8;
   --station: #c2410c;
+  --ua: #d1267a;        /* unacquired station */
+  --ua-closed: #8e44ad; /* unacquired, closed in the data (still a station in the game) */
   /* BIZ UDPGothic: web font from Google Fonts (also installed on Windows 10 1809+). If it cannot load:
      macOS/iOS → Hiragino; Windows 7+ → Meiryo (both names; before Yu Gothic, which renders thin on Windows);
      Android → Noto Sans CJK JP (system font; Droid Sans Japanese on old versions);
@@ -81,6 +83,14 @@ input[type=range] { width: 100%; accent-color: var(--region); }
   text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 2px #fff, 0 0 1px #fff; }
 .lbl.closed { color: var(--muted); }
 .lbl.on { color: var(--station); font-size: 14px; }
+.lbl.ua { color: var(--ua); }
+.lbl.ua.closed { color: var(--ua-closed); }
+.ualist { margin: 0; padding: 0; list-style: none; max-height: 240px; overflow: auto; display: grid; gap: 1px; font-size: 12.5px; }
+.ualist button { display: grid; grid-template-columns: 1fr auto; gap: 8px; width: 100%; border: none; background: none; padding: 4px 6px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; border-radius: 3px; }
+.ualist button:hover { background: #f3eef6; }
+.ualist .d { font-family: var(--font-data); font-variant-numeric: tabular-nums; color: var(--muted); }
+.ualist .c { color: var(--ua-closed); }
+.badge { display: inline-block; font-size: 11px; color: #fff; background: var(--ua); border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: 2px; }
 .geo { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 6px; }
 .geo .label { margin-bottom: 2px; }
 .status { font-size: 12.5px; line-height: 1.5; }
@@ -137,6 +147,29 @@ details.sub[open] > summary { margin-bottom: 4px; }
 
   <div class="sel" id="selbox"></div>
 
+  <div class="sub" id="uaSec">
+    <div class="label">未取得駅<output id="uaCount" style="font-size:13px"></output></div>
+    <div class="row">
+      <button class="btn" id="uaImport">CSV を読み込む</button>
+      <button class="btn" id="uaExport">CSV に書き出す</button>
+      <button class="btn" id="uaClear">すべて消す</button>
+      <input type="file" id="uaFile" accept=".csv,text/csv" hidden>
+    </div>
+    <div class="note">駅メモの駅メモ機能から書き出した CSV を読み込みます（メモ本文が ❌ の駅を未取得とみなします）。地図の駅を<b>長押し</b>（PC では右クリック）すると、取得済み／未取得を切り替えられます。データはこのブラウザの中にだけ保存します。</div>
+    <div class="note" id="uaInfo"></div>
+    <label class="check"><input type="checkbox" id="uaArea1"> 未取得駅を位置登録で取れる範囲を塗る（最寄り駅になる範囲）</label>
+    <label class="check"><input type="checkbox" id="uaAreaK"> 未取得駅をレーダーで取れる範囲を塗る（k 位以内に入る範囲）</label>
+    <label class="check"><input type="checkbox" id="nUa" checked> 未取得駅がレーダーに入ったら通知</label>
+    <div class="field">
+      <label class="label" for="uaSort">一覧の並び</label>
+      <select id="uaSort">
+        <option value="near" selected>近い順（現在地、なければ地図の中心から）</option>
+        <option value="pref">都道府県順</option>
+      </select>
+    </div>
+    <ol class="ualist" id="uaList"></ol>
+  </div>
+
   <div class="geo">
     <div class="label">現在地と通知</div>
     <label class="check"><input type="checkbox" id="geoUse"> 現在地を使う</label>
@@ -192,7 +225,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <div class="note" id="datainfo"></div>
     <div><button class="btn" id="refresh">GitHub から最新データを取得</button></div>
     <label class="check"><input type="checkbox" id="dbgRank"> デバッグ：地図の駅以外をクリックすると、その地点のレーダー順位を表示する</label>
-    <div class="note">テスト用：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします。</div>
+    <div class="note">テスト用：地図の駅以外の所を右クリック（スマホでは長押し）すると、その地点を現在地とみなします。</div>
   </div>
 </section>
 
@@ -213,7 +246,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const st = {
     all: [], rows: [], idx: null, version: EMBED.version,
     sel: -1, k: 18, metric: "flat", clip: 3,
-    cache: new Map(), viewJob: 0, levelJob: 0, vorJob: 0,
+    cache: new Map(), viewJob: 0, levelJob: 0, vorJob: 0, uaJob: 0,
+    ua: new Map(), // unacquired stations: name -> last-updated string (as in the 駅メモ CSV)
   };
 
   // ---------------- map
@@ -240,6 +274,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
   const meR = L.canvas({ pane: "me", padding: 0.3 });
   const stationLayer = L.layerGroup().addTo(map);
+  // unacquired-station areas: filled at full opacity on their own panes, the pane opacity makes
+  // the union look uniform (overlaps don't get darker); click-through
+  const uaPane = (name, z, op) => { const p = map.createPane(name); p.style.zIndex = z; p.style.opacity = op; p.style.pointerEvents = "none"; return L.canvas({ pane: name, padding: 0.3 }); };
+  const uaRK = uaPane("uaK", 380, 0.18), uaR1 = uaPane("ua1", 390, 0.3);
+  const uaLayerK = L.layerGroup().addTo(map), uaLayer1 = L.layerGroup().addTo(map);
   const vorLayer = L.layerGroup().addTo(map);
   const viewLayer = L.layerGroup().addTo(map);
   const levelLayer = L.layerGroup().addTo(map);
@@ -255,12 +294,13 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
   function applyFilter(keepSel) {
     const prevId = st.sel >= 0 ? st.rows[st.sel][0] : null;
-    st.rows = $("showClosed").checked ? st.all : st.all.filter(r => !r[6]);
+    st.rows = $("showClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
     const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
     st.idx = makeIndex(lat, lng);
     st.cache.clear();
     drawStations();
     drawVor();
+    uaChanged(false);
     $("datainfo").textContent = `駅データ main 版 ${fmtVer(st.version)}・${st.rows.length.toLocaleString()} 駅`;
     let sel = -1;
     if (keepSel && prevId != null) sel = st.rows.findIndex(r => r[0] === prevId);
@@ -269,17 +309,29 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
   const fmtVer = (v) => /^\d{8}$/.test(v) ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6)}` : v;
 
+  const isUa = (i) => st.ua.has(st.rows[i][2]);
+  function stationStyle(i) {
+    const r = st.rows[i], ua = isUa(i), sel = i === st.sel;
+    return {
+      renderer: canvasR, radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1, color: "#fff",
+      fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : (r[6] ? "#9aa0ad" : "#c2410c"),
+      fillOpacity: st.ua.size && !ua ? 0.5 : 0.95, // with a list loaded, acquired stations recede
+    };
+  }
+  const stationTip = (i) => st.rows[i][2] + (st.rows[i][6] ? "（廃駅）" : "") + (isUa(i) ? "（未取得）" : "");
   function drawStations() {
     stationLayer.clearLayers(); markers = [];
     st.rows.forEach((r, i) => {
-      const m = L.circleMarker([r[4], r[5]], {
-        renderer: canvasR, radius: 3, weight: 1, color: "#fff", fillColor: r[6] ? "#9aa0ad" : "#c2410c", fillOpacity: 0.95,
-      });
-      m.bindTooltip(r[2] + (r[6] ? "（廃駅）" : ""), { direction: "top", offset: [0, -4] });
+      const m = L.circleMarker([r[4], r[5]], stationStyle(i));
+      m.bindTooltip(stationTip(i), { direction: "top", offset: [0, -4] });
       m.on("click", (e) => { L.DomEvent.stopPropagation(e); select(i, false); map.panTo([r[4], r[5]]); });
+      // long press (touch) / right click: toggle acquired <-> unacquired
+      m.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); });
       m.addTo(stationLayer); markers.push(m);
     });
+    st.styledSel = st.sel;
   }
+  function restyleStation(i) { if (i >= 0 && markers[i]) { markers[i].setStyle(stationStyle(i)); markers[i].setTooltipContent(stationTip(i)); } }
 
   // ---------------- line styles (per boundary kind; saved per browser)
   const STYLE_KINDS = [
@@ -323,7 +375,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   function redraw(fly) {
     regionLayer.clearLayers(); levelLayer.clearLayers();
-    markers.forEach((m, j) => m.setRadius(j === st.sel ? 7 : 3));
+    const was = st.styledSel; st.styledSel = st.sel; restyleStation(was); restyleStation(st.sel);
     if (st.sel < 0) return;
     const r = st.rows[st.sel];
     const t0 = performance.now();
@@ -334,7 +386,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     if (fly) map.fitBounds(poly.getBounds(), { padding: [40, 40], maxZoom: 13 });
     const area = sphericalArea(R.latlng);
     $("selbox").innerHTML =
-      `<div class="name">${esc(r[2])}<small>${esc(r[3])}${r[6] ? "・廃駅" : ""}</small></div>` +
+      `<div class="name">${esc(r[2])}<small>${esc(r[3])}${r[6] ? "・廃駅" : ""}</small>${isUa(st.sel) ? '<span class="badge">未取得</span>' : ""}</div>` +
+      `<div><button class="btn" id="uaToggleSel">${isUa(st.sel) ? "取得済みにする" : "未取得にする"}</button></div>` +
       `<dl class="stats">` +
       `<dt>${st.k} 位以内の地域の面積</dt><dd>${area < 100 ? area.toFixed(1) : Math.round(area).toLocaleString()} km²</dd>` +
       `<dt>計算時間</dt><dd>${(R.ms ?? ms).toFixed(1)} ms</dd>` +
@@ -342,6 +395,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       `<dt>境界の頂点</dt><dd>${R.local.length} 個</dd></dl>`;
     if ($("levels").checked) drawLevels();
     if ($("viewAll").checked) drawView();
+    drawUaAreas();
     updateLabels();
     track.prev = null; if (track.pos) evaluate(false); // settings changed: re-baseline without notifying
   }
@@ -355,7 +409,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     if (st.sel >= 0 && !ids.includes(st.sel)) ids.push(st.sel);
     if (ids.length > 450) return; // too crowded to read; zoom in
     for (const i of ids) {
-      const r = st.rows[i], cls = "lbl" + (i === st.sel ? " on" : "") + (r[6] ? " closed" : "");
+      const r = st.rows[i], cls = "lbl" + (i === st.sel ? " on" : "") + (r[6] ? " closed" : "") + (isUa(i) ? " ua" : "");
       L.marker([r[4], r[5]], {
         icon: L.divIcon({ className: "lbl-wrap", html: `<span class="${cls}">${esc(r[2])}</span>`, iconSize: null, iconAnchor: i === st.sel ? [-10, 9] : [-6, 8] }),
         interactive: false, keyboard: false,
@@ -404,6 +458,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const { lat, lng, acc, simulated } = track.pos;
     const R = rankAt(lat, lng), near = R.top[0], set = new Set(R.top);
     const inSel = st.sel >= 0 && R.selRank <= st.k;
+    const uaIn = R.top.filter(isUa), uaSet = new Set(uaIn);
     const P = track.prev;
     if (notifyChanges && P) {
       const nm = (i) => st.rows[i][2];
@@ -412,14 +467,21 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
         const inn = R.top.filter(i => !P.set.has(i)), out = [...P.set].filter(i => !set.has(i));
         if (inn.length || out.length) notify(`レーダーの顔ぶれ：${inn.length ? "＋" + inn.map(nm).join("・") : ""}${inn.length && out.length ? " / " : ""}${out.length ? "－" + out.map(nm).join("・") : ""}`);
       }
+      if ($("nUa").checked && st.ua.size) {
+        const inn = uaIn.filter(i => !P.uaSet.has(i));
+        if (inn.length) notify(`未取得駅がレーダーに入りました：${inn.map(nm).join("・")}` + (inn.includes(near) ? `（${nm(near)} は最寄り＝位置登録で取れます）` : ""));
+        else if (P.near !== near && isUa(near)) notify(`最寄り駅 ${nm(near)} は未取得です（位置登録で取れます）`);
+      }
       if ($("nSel").checked && st.sel >= 0 && P.sel === st.sel && P.inSel !== inSel)
         notify(inSel ? `${nm(st.sel)} の圏内に入りました（${R.selRank} 位）` : `${nm(st.sel)} の圏外に出ました（${R.selRank} 位）`);
     }
-    track.prev = { near, set, inSel, sel: st.sel };
+    track.prev = { near, set, inSel, sel: st.sel, uaSet };
     const r0 = st.rows[near];
     $("geoStatus").innerHTML =
       `${simulated ? "テスト位置" : "現在地"}の最寄り：<b>${esc(r0[2])}</b>（${km(lat, lng, r0[4], r0[5])}${acc ? `・精度 ±${Math.round(acc)} m` : ""}）` +
-      (st.sel >= 0 ? `<br>${esc(st.rows[st.sel][2])} は <b>${R.selRank} 位</b>（${inSel ? "圏内" : "圏外"}）` : "");
+      (st.sel >= 0 ? `<br>${esc(st.rows[st.sel][2])} は <b>${R.selRank} 位</b>（${inSel ? "圏内" : "圏外"}）` : "") +
+      (st.ua.size ? `<br>レーダー内の未取得駅：${uaIn.length ? uaIn.map(i => `<b style="color:var(--ua)">${esc(st.rows[i][2])}</b>`).join("・") : "なし"}` : "");
+    if ($("uaSort").value === "near") renderUaList();
   }
 
   function notify(msg) {
@@ -626,12 +688,13 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   });
 
   // ---------------- helpers
-  function km(a1, o1, a2, o2) {
+  function kmOf(a1, o1, a2, o2) {
     const R = 6371.0088, p1 = a1 * DEG, p2 = a2 * DEG, dp = p2 - p1, dl = (o2 - o1) * DEG;
     const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
-    const d = 2 * R * Math.asin(Math.sqrt(h));
-    return d < 10 ? d.toFixed(2) + " km" : d.toFixed(1) + " km";
+    return 2 * R * Math.asin(Math.sqrt(h));
   }
+  const fmtKm = (d) => d < 10 ? d.toFixed(2) + " km" : d.toFixed(1) + " km";
+  const km = (a1, o1, a2, o2) => fmtKm(kmOf(a1, o1, a2, o2));
   function sphericalArea(ll) { // km², via local equal-area approximation per polygon (fine at this scale)
     const R = 6371.0088; let s = 0;
     for (let i = 0; i < ll.length; i++) {
@@ -726,7 +789,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       toast(`取得できませんでした（${e.message}）。同梱のデータ（${fmtVer(EMBED.version)}）のまま使えます。`);
     } finally { btn.disabled = false; btn.textContent = "GitHub から最新データを取得"; }
   });
-  function parseStationCsv(text) {
+  function parseCsv(text) {
     const lines = [], re = /("([^"]|"")*"|[^,\r\n]*)(,|\r?\n|$)/g;
     let row = [], m;
     while ((m = re.exec(text)) && m[0] !== "") {
@@ -734,12 +797,124 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       row.push(v);
       if (m[3] !== ",") { lines.push(row); row = []; }
     }
+    return lines;
+  }
+  function parseStationCsv(text) {
+    const lines = parseCsv(text);
     const h = lines[0], col = (n) => h.indexOf(n);
     const ci = { id: col("id"), code: col("code"), name: col("name"), kana: col("name_kana"), lat: col("lat"), lng: col("lng"), closed: col("closed"), pref: col("prefecture") };
     return lines.slice(1).filter(r => r.length >= h.length).map(r => [
       +r[ci.id], +r[ci.code], r[ci.name], r[ci.kana], +r[ci.lat], +r[ci.lng],
       (r[ci.closed] === "1" || r[ci.closed] === "true") ? 1 : 0, +r[ci.pref]]);
   }
+
+  // ---------------- unacquired stations (駅メモ "station memo" CSV: 最終更新日, 駅名, メモ本文; ❌ = unacquired)
+  const nowStamp = () => { const d = new Date(), z = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`; };
+  function saveUa() { try { localStorage.setItem("unacq", JSON.stringify([...st.ua])); } catch (e) {} }
+  function loadUa() { try { st.ua = new Map(JSON.parse(localStorage.getItem("unacq") || "[]")); } catch (e) { st.ua = new Map(); } }
+  function toggleUa(i) {
+    const name = st.rows[i][2], was = st.ua.has(name);
+    if (was) st.ua.delete(name); else st.ua.set(name, nowStamp());
+    saveUa();
+    toast(was ? `${name} を取得済みにしました（もう一度長押しで戻せます）` : `${name} を未取得にしました`);
+    const first = st.ua.size === (was ? 0 : 1); // acquired stations fade only while a list exists
+    if (first) markers.forEach((m, j) => m.setStyle(stationStyle(j)));
+    restyleStation(i);
+    if (i === st.sel) { redraw(false); uaChanged(false); } else uaChanged(true); // redraw() redraws the areas
+  }
+  // after the set changed: labels, areas, list, radar baseline (no notification for our own edit)
+  function uaChanged(areas) {
+    $("uaCount").textContent = st.ua.size ? `${st.ua.size.toLocaleString()} 駅` : "";
+    updateLabels(); renderUaList();
+    if (areas) drawUaAreas();
+    if (track.pos) evaluate(false);
+  }
+  function renderUaList() {
+    const ids = [];
+    st.rows.forEach((r, i) => { if (st.ua.has(r[2])) ids.push(i); });
+    let from = null;
+    if ($("uaSort").value === "near") {
+      const c = track.pos ? [track.pos.lat, track.pos.lng] : [map.getCenter().lat, map.getCenter().lng];
+      from = track.pos ? "現在地" : "地図の中心";
+      const d = new Map(ids.map(i => [i, kmOf(c[0], c[1], st.rows[i][4], st.rows[i][5])]));
+      ids.sort((a, b) => d.get(a) - d.get(b));
+      st.uaDist = d;
+    } else ids.sort((a, b) => st.rows[a][7] - st.rows[b][7] || st.rows[a][3].localeCompare(st.rows[b][3], "ja"));
+    $("uaList").innerHTML = ids.map(i => {
+      const r = st.rows[i], sub = from ? fmtKm(st.uaDist.get(i)) : (PREF[r[7]] || "");
+      return `<li><button type="button" data-i="${i}"><span class="${r[6] ? "c" : ""}">${esc(r[2])}</span><span class="d">${sub}</span></button></li>`;
+    }).join("");
+    $("uaList").title = from ? `${from}からの距離` : "";
+  }
+  $("uaList").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const i = +b.dataset.i; select(i, false); map.panTo([st.rows[i][4], st.rows[i][5]]);
+  });
+  $("uaSort").addEventListener("change", renderUaList);
+  map.on("moveend", () => { if (!track.pos && $("uaSort").value === "near" && st.ua.size) renderUaList(); });
+  $("selbox").addEventListener("click", (e) => { if (e.target.id === "uaToggleSel" && st.sel >= 0) toggleUa(st.sel); });
+  // filled areas: union of R_1 (位置登録) / R_k (レーダー) over all unacquired stations (async, cached per station)
+  function drawUaAreas() {
+    const job = ++st.uaJob; uaLayer1.clearLayers(); uaLayerK.clearLayers();
+    const want1 = $("uaArea1").checked, wantK = $("uaAreaK").checked;
+    if (!st.ua.size || !(want1 || wantK)) return;
+    const ids = []; st.rows.forEach((r, i) => { if (st.ua.has(r[2])) ids.push(i); });
+    const style = { fillColor: "#d1267a", fillOpacity: 1, stroke: false, fillRule: "nonzero", interactive: false };
+    let q = 0;
+    const step = () => {
+      if (job !== st.uaJob) return;
+      const t = performance.now(), b1 = [], bK = [];
+      while (q < ids.length && performance.now() - t < 24) {
+        if (want1) b1.push(region(ids[q], 1).latlng);
+        if (wantK) bK.push(region(ids[q], st.k).latlng);
+        q++;
+      }
+      if (b1.length) L.polygon(b1, { ...style, renderer: uaR1 }).addTo(uaLayer1);
+      if (bK.length) L.polygon(bK, { ...style, renderer: uaRK }).addTo(uaLayerK);
+      if (q < ids.length) setTimeout(step, 0);
+    };
+    step();
+  }
+  $("uaArea1").addEventListener("change", drawUaAreas);
+  $("uaAreaK").addEventListener("change", drawUaAreas);
+  // import / export / clear
+  $("uaImport").addEventListener("click", () => $("uaFile").click());
+  $("uaFile").addEventListener("change", async () => {
+    const f = $("uaFile").files[0]; $("uaFile").value = ""; if (!f) return;
+    const buf = await f.arrayBuffer();
+    let text = new TextDecoder("utf-8").decode(buf);
+    if (text.includes("\uFFFD")) try { text = new TextDecoder("shift_jis").decode(buf); } catch (e) {}
+    const rows = parseCsv(text.replace(/^\uFEFF/, ""));
+    const h = rows[0] || [], cName = h.indexOf("駅名"), cMemo = h.indexOf("メモ本文"), cDate = h.indexOf("最終更新日");
+    if (cName < 0) { toast("「駅名」の列がない CSV です。駅メモから書き出した CSV を選んでください。"); return; }
+    const known = new Set(st.all.map(r => r[2])), next = new Map(), unknown = [];
+    for (const r of rows.slice(1)) {
+      const name = (r[cName] || "").trim();
+      if (!name || (cMemo >= 0 && !(r[cMemo] || "").includes("❌"))) continue;
+      if (known.has(name)) next.set(name, (cDate >= 0 && r[cDate]) || nowStamp()); else unknown.push(name);
+    }
+    if (st.ua.size && !confirm(`いまの未取得駅（${st.ua.size} 駅）を、読み込んだ内容（${next.size} 駅）で置き換えますか？`)) return;
+    st.ua = next; saveUa();
+    $("uaInfo").textContent = `${f.name} から未取得 ${next.size} 駅を読み込みました。` +
+      (unknown.length ? `駅データにない駅名（${unknown.length}）：${unknown.slice(0, 20).join("・")}${unknown.length > 20 ? " ほか" : ""}` : "すべての駅名が駅データと一致しました。");
+    applyFilter(true); // closed unacquired stations must be present even when closed ones are hidden
+  });
+  $("uaExport").addEventListener("click", () => {
+    if (!st.ua.size) { toast("未取得駅がありません。"); return; }
+    const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [["最終更新日", "駅名", "メモ本文"].map(q).join(",")]
+      .concat([...st.ua].map(([name, date]) => [date, name, "❌"].map(q).join(",")));
+    const blob = new Blob(["\uFEFF" + lines.join("\r\n") + "\r\n"], { type: "text/csv" });
+    const a = document.createElement("a"), d = nowStamp().replace(/[-:]/g, "").replace(" ", "-");
+    a.href = URL.createObjectURL(blob); a.download = `station-memos-${d}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $("uaClear").addEventListener("click", () => {
+    if (!st.ua.size || !confirm(`未取得駅（${st.ua.size} 駅）をすべて消しますか？（先に「CSV に書き出す」で保存できます）`)) return;
+    st.ua = new Map(); saveUa(); $("uaInfo").textContent = "";
+    applyFilter(true);
+  });
 
   // ---------------- line style editor
   function buildStyleBox() {
@@ -788,6 +963,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   } catch (e) {}
   geoCtl.update();
   buildStyleBox();
+  loadUa();
   loadRows(EMBED.rows, EMBED.version);
   if (hp.get("id")) { const i = st.rows.findIndex(r => r[0] === +hp.get("id")); if (i >= 0) select(i, true); }
 })();
