@@ -81,7 +81,8 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 - `npm test` が平均と最大を表示する。速度が大きく落ちる変更をしたら報告すること。
 
 ## 画面側（src/index.template.html）の要点
-- `region(i, k)`：metric・clip・k・駅ごとに結果をキャッシュする。設定が変わったら `st.cache` を作り直す。
+- `region(i, k)`：metric・clip・k・駅ごとに結果をキャッシュする（`st.cache`。選んだ駅の範囲など、その場で 1 つだけ必要なときに使う）。駅データが変わったら作り直す。
+- **多数の範囲の計算は Web Worker で行う**（`regionsAsync(ch, [[駅, k], ...], onBatch)`）：最寄り駅の境界（`vor`）・全駅の境界（`view`）・1〜k 位の境界（`lv`）・未取得駅の範囲（`ua1` `uaK`）。Worker はページに埋め込んだ `station_core.js`（`<script id="core-src">`）をそのまま Blob から読み込む。結果は約 30 ms 分ずつ返り、こちらで `st.lcache`（緯度経度のみ）に溜める。同じチャンネルの新しい依頼が来たら古い依頼は捨てる（`cancelAsync`）。駅データが変わったら `st.gen` を進めて Worker にデータを送り直す。Worker が使えない環境では同じ依頼をこのスレッドで小分けに計算する。各描画関数は自分のジョブ番号（`st.vorJob` など）で古い結果を無視する。
 - **駅の点（消さないこと）**：9,372 駅を Leaflet のオブジェクトにせず、レイヤーを持たない `L.Canvas` を拡張した `DotCanvas`（`dotR`）の `_draw` で自前に描く（`drawDots`）。Leaflet が canvas の大きさ・位置・ズームのアニメーションを受け持ち、移動のたびに canvas を消して `_draw` を呼ぶ（`update` イベントで描くと、直後に Leaflet が消してしまう）。描く範囲内の駅だけを、見た目ごとにまとめて 1 本の path で描く。Leaflet の非公開の `_ctx` `_bounds` を使うので、Leaflet の版を上げるときは要確認。
   - 操作：駅の点の pane（`stations`、z-index 610）は `pointer-events: none`。タップ・長押し（右クリック）・マウスを乗せたときは、地図のイベントの座標から一番近い点（半径＋8 px 以内）を探す（`hitStation`）。タップ＝選択、長押し＝取得済み／未取得の切り替え、点以外の長押し＝テスト位置、マウスを乗せる＝駅名の吹き出しとポインタ。
   - 重なり順：境界線（`lineR`、overlayPane 400）→ 駅名（`names` 600）→ 駅の点（610）→ 現在地（640）。点がいちばん上なので、駅名や境界に隠れない。

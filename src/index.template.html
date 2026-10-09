@@ -252,7 +252,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script>
+<script id="core-src">
 /*CORE*/
 </script>
 <script>
@@ -318,7 +318,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     st.rows = $("showClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
     const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
     st.idx = makeIndex(lat, lng);
-    st.cache.clear();
+    st.cache.clear(); st.lcache.clear(); st.gen++;
+    if (worker) worker.postMessage({ type: "data", gen: st.gen, lat, lng });
     drawStations();
     drawVor();
     uaChanged(false);
@@ -432,6 +433,63 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     return R;
   }
 
+  // ---------------- background computation (Web Worker) for the drawings of many regions
+  // The worker runs the same station_core.js (the inline <script id="core-src">), so the page stays responsive
+  // while hundreds of regions are computed. A job is a list of [station, k]; results come back in chunks
+  // (~30 ms of work each) and are cached here (st.lcache: latlng only). A newer job on the same channel
+  // replaces the older one in the worker. Without Worker support the same jobs run here in small slices.
+  const WORKER_SRC = `
+    let idx = null, gen = -1, running = false; const jobs = new Map();
+    self.onmessage = (e) => { const m = e.data;
+      if (m.type === "data") { idx = makeIndex(m.lat, m.lng); gen = m.gen; jobs.clear(); return; }
+      if (m.items.length) jobs.set(m.ch, Object.assign(m, { q: 0 })); else jobs.delete(m.ch);
+      if (!running && jobs.size) { running = true; setTimeout(run, 0); }
+    };
+    function run() {
+      for (const [ch, j] of jobs) { // one chunk per channel per round, then let new messages in
+        if (j.gen !== gen) { jobs.delete(ch); continue; }
+        const out = [], t = performance.now();
+        while (j.q < j.items.length && performance.now() - t < 30) { const [i, k] = j.items[j.q++]; out.push([i, k, regionOf(idx, i, k, j.metric, j.clip).latlng]); }
+        self.postMessage({ ch, job: j.job, gen: j.gen, metric: j.metric, clip: j.clip, out });
+        if (j.q >= j.items.length) jobs.delete(ch);
+      }
+      if (jobs.size) setTimeout(run, 0); else running = false;
+    }`;
+  st.lcache = new Map(); st.gen = 0;
+  const asyncCb = new Map(); // channel -> { job, onBatch }
+  let worker = null, jobSeq = 0;
+  try {
+    worker = new Worker(URL.createObjectURL(new Blob([$("core-src").textContent + "\n" + WORKER_SRC], { type: "text/javascript" })));
+    worker.onmessage = (e) => {
+      const m = e.data; if (m.gen !== st.gen) return;
+      for (const [i, k, ll] of m.out) st.lcache.set(`${m.metric}|${m.clip}|${k}|${i}`, ll);
+      const cb = asyncCb.get(m.ch); if (cb && cb.job === m.job) cb.onBatch(m.out);
+    };
+    worker.onerror = () => { worker = null; };
+  } catch (e) { worker = null; }
+  const cachedLL = (i, k) => { const key = `${st.metric}|${st.clip}|${k}|${i}`, R = st.cache.get(key); return R ? R.latlng : st.lcache.get(key); };
+  // regions for items [[i, k], ...]: cached ones at once, the rest as they are computed; onBatch([[i, k, latlng], ...])
+  function regionsAsync(ch, items, onBatch) {
+    const job = ++jobSeq, hit = [], miss = [];
+    for (const [i, k] of items) { const ll = cachedLL(i, k); if (ll) hit.push([i, k, ll]); else miss.push([i, k]); }
+    asyncCb.set(ch, { job, onBatch });
+    if (hit.length) onBatch(hit);
+    if (worker) { worker.postMessage({ ch, job, gen: st.gen, metric: st.metric, clip: st.clip, items: miss }); return; }
+    let q = 0;
+    const step = () => {
+      const cb = asyncCb.get(ch); if (!cb || cb.job !== job) return;
+      const t = performance.now(), out = [];
+      while (q < miss.length && performance.now() - t < 24) { const [i, k] = miss[q++]; out.push([i, k, region(i, k).latlng]); }
+      if (out.length) onBatch(out);
+      if (q < miss.length) setTimeout(step, 0);
+    };
+    if (miss.length) setTimeout(step, 0);
+  }
+  function cancelAsync(ch) {
+    asyncCb.delete(ch);
+    if (worker) worker.postMessage({ ch, job: ++jobSeq, gen: st.gen, items: [] });
+  }
+
   function select(i, fly) {
     st.sel = i;
     if (i < 0) return;
@@ -461,7 +519,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       `<dt>計算時間</dt><dd>${(R.ms ?? ms).toFixed(1)} ms</dd>` +
       `<dt>使った二等分線</dt><dd>${R.lines} 本</dd>` +
       `<dt>境界の頂点</dt><dd>${R.local.length} 個</dd></dl>`;
-    if ($("levels").checked) drawLevels();
+    if ($("levels").checked) drawLevels(); else { st.levelJob++; cancelAsync("lv"); }
     if ($("viewAll").checked) drawView();
     drawUaAreas();
     updateLabels();
@@ -741,21 +799,16 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   // contours R_1 ... R_k (async, cheap per level)
   function drawLevels() {
-    const job = ++st.levelJob, i = st.sel, K = st.k;
-    let j = 1;
-    const step = () => {
+    const job = ++st.levelJob, i = st.sel, K = st.k, items = [];
+    for (let j = 1; j < K; j++) items.push([i, j]);
+    regionsAsync("lv", items, (out) => {
       if (job !== st.levelJob) return;
-      const t = performance.now();
-      while (j < K && performance.now() - t < 24) {
-        const R = region(i, j);
-        const f = j / K;
-        const ls = lineStyle("lv"), pl = L.polygon(R.latlng, { renderer: lineR, ...ls, opacity: ls.opacity * lvOpacity(f), fill: false, interactive: false });
+      const ls = lineStyle("lv");
+      for (const [, j, ll] of out) {
+        const f = j / K, pl = L.polygon(ll, { renderer: lineR, ...ls, opacity: ls.opacity * lvOpacity(f), fill: false, interactive: false });
         pl.levelF = f; pl.addTo(levelLayer);
-        j++;
       }
-      if (j < K) setTimeout(step, 0);
-    };
-    step();
+    });
   }
 
   // order-k diagram for stations in view (async, capped)
@@ -795,18 +848,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   function drawView() {
     const job = ++st.viewJob; viewLayer.clearLayers();
-    if (!$("viewAll").checked || map.getZoom() < +$("bndZoom").value) return;
+    if (!$("viewAll").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("view"); return; }
     const ids = stationsForView(st.k, 0.1);
     const CAP = 800, todo = ids.slice(0, CAP);
-    let q = 0;
-    const step = () => {
-      if (job !== st.viewJob) return;
-      const t = performance.now(), batch = [];
-      while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], st.k).latlng); q++; }
-      if (batch.length) L.polygon(batch, { renderer: lineR, ...lineStyle("view"), fill: false, interactive: false }).addTo(viewLayer);
-      if (q < todo.length) setTimeout(step, 0);
-    };
-    step();
+    regionsAsync("view", todo.map(i => [i, st.k]), (out) => {
+      if (job === st.viewJob) L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("view"), fill: false, interactive: false }).addTo(viewLayer);
+    });
     if (ids.length > CAP) toast(`表示範囲の駅が多いため、中心に近い ${CAP} 駅だけ描いています。拡大すると全部描けます。`);
   }
   map.on("moveend", () => { if ($("viewAll").checked) drawView(); });
@@ -815,17 +862,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ~0.5 ms per station and cached, so panning around is cheap after the first pass.
   function drawVor() {
     const job = ++st.vorJob; vorLayer.clearLayers();
-    if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) return;
+    if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("vor"); return; }
     const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
-    let q = 0;
-    const step = () => {
-      if (job !== st.vorJob) return;
-      const t = performance.now(), batch = [];
-      while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], 1).latlng); q++; }
-      if (batch.length) L.polygon(batch, { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
-      if (q < todo.length) setTimeout(step, 0);
-    };
-    step();
+    regionsAsync("vor", todo.map(i => [i, 1]), (out) => {
+      if (job === st.vorJob) L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
+    });
   }
   map.on("moveend", () => { if ($("vor1").checked) drawVor(); });
 
@@ -903,7 +944,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     drawVor();
   });
   $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
-  $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; viewLayer.clearLayers(); } });
+  $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; cancelAsync("view"); viewLayer.clearLayers(); } });
   $("showClosed").addEventListener("change", () => applyFilter(true));
   $("fold").addEventListener("click", () => {
     const p = $("panel"); p.classList.toggle("collapsed");
@@ -1033,23 +1074,13 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function drawUaAreas() {
     const job = ++st.uaJob; uaLayer1.clearLayers(); uaLayerK.clearLayers();
     const want1 = $("uaArea1").checked, wantK = $("uaAreaK").checked;
+    if (!want1) cancelAsync("ua1"); if (!wantK) cancelAsync("uaK");
     if (!st.ua.size || !(want1 || wantK)) return;
     const ids = []; st.rows.forEach((r, i) => { if (st.ua.has(r[2])) ids.push(i); });
     const style = { fillColor: "#d1267a", fillOpacity: 1, stroke: false, fillRule: "nonzero", interactive: false };
-    let q = 0;
-    const step = () => {
-      if (job !== st.uaJob) return;
-      const t = performance.now(), b1 = [], bK = [];
-      while (q < ids.length && performance.now() - t < 24) {
-        if (want1) b1.push(region(ids[q], 1).latlng);
-        if (wantK) bK.push(region(ids[q], st.k).latlng);
-        q++;
-      }
-      if (b1.length) L.polygon(b1, { ...style, renderer: uaR1 }).addTo(uaLayer1);
-      if (bK.length) L.polygon(bK, { ...style, renderer: uaRK }).addTo(uaLayerK);
-      if (q < ids.length) setTimeout(step, 0);
-    };
-    step();
+    const add = (layer, renderer) => (out) => { if (job === st.uaJob) L.polygon(out.map(o => o[2]), { ...style, renderer }).addTo(layer); };
+    if (want1) regionsAsync("ua1", ids.map(i => [i, 1]), add(uaLayer1, uaR1));
+    if (wantK) regionsAsync("uaK", ids.map(i => [i, st.k]), add(uaLayerK, uaRK));
   }
   $("uaArea1").addEventListener("change", drawUaAreas);
   $("uaAreaK").addEventListener("change", drawUaAreas);
