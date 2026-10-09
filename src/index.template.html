@@ -51,7 +51,8 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   background: linear-gradient(135deg, rgba(38, 44, 58, 0.78), rgba(70, 78, 96, 0.5));
   box-shadow: 0 4px 16px rgba(20, 24, 34, 0.25); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 #nearBox[hidden] { display: none; }
-#nearBox .k { font-size: 9.5px; letter-spacing: 0.1em; opacity: 0.8; }
+#nearBox .k { font-size: 9.5px; letter-spacing: 0.1em; opacity: 0.8; line-height: 1.3; }
+#nearBox .y { font-size: 8.5px; font-weight: 700; letter-spacing: 0.08em; opacity: 0.75; line-height: 1.05; margin: 2px 0 -1px; } /* furigana */
 #nearBox .n { font-size: 17px; font-weight: 700; line-height: 1.2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #nearBox .d { font-size: 10.5px; opacity: 0.85; font-variant-numeric: tabular-nums; }
 #nearBox .ua { display: inline-block; margin-left: 5px; font-size: 9.5px; padding: 0 5px; border-radius: 3px; background: var(--ua); vertical-align: 3px; }
@@ -79,6 +80,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   body.compact #nearBox[hidden] { display: none; }
   body.compact #nearBox .k { font-size: 9px; letter-spacing: 0.04em; }
   body.compact #nearBox .n { font-size: 14px; }
+  body.compact #nearBox .y { display: none; }
   body.compact .panel { max-height: 64%; padding: 10px 12px; gap: 10px; }
   body.compact .panel .head { margin: -10px -12px 0; padding: 10px 12px 4px; top: -10px; }
   body.compact .panel.collapsed { right: 6px; bottom: calc(26px + env(safe-area-inset-bottom, 0px)); padding: 0; }
@@ -1029,7 +1031,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const box = $("nearBox");
     if (!$("nearOn").checked || near == null) { box.hidden = true; return; }
     const r = st.rows[near];
-    box.innerHTML = `<div class="k">${simulated ? "指定位置の" : ""}最寄り駅</div><div class="n">${esc(r[2])}${isUa(near) ? '<span class="ua">未取得</span>' : ""}</div><div class="d">${km(lat, lng, r[4], r[5])}</div>`;
+    box.innerHTML = `<div class="k">${simulated ? "指定位置の" : ""}最寄り駅</div>${r[3] ? `<div class="y">${esc(r[3])}</div>` : ""}<div class="n">${esc(r[2])}${isUa(near) ? '<span class="ua">未取得</span>' : ""}</div><div class="d">${km(lat, lng, r[4], r[5])}</div>`;
     box.hidden = false;
   }
 
