@@ -101,7 +101,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .geo-ctl a svg { width: 20px; height: 20px; }
 .geo-ctl a.on { background: var(--region); color: #fff; }
 .geo-ctl a.on:hover { background: #174b86; }
-.geo-ctl a.disabled { color: #b5bac6; cursor: default; }
+.geo-ctl a.armed { color: var(--region); } /* follow is on but the location is not in use */
 </style>
 </head>
 <body>
@@ -139,7 +139,10 @@ details.sub[open] > summary { margin-bottom: 4px; }
 
   <div class="geo">
     <div class="label">現在地と通知</div>
-    <div class="note">地図右上のボタンで、現在地を使う（地図が現在地に追従する）かどうかの切り替えと、現在地への移動ができます。手で地図を動かすと 15 秒間は追従を止めます。</div>
+    <label class="check"><input type="checkbox" id="geoUse"> 現在地を使う</label>
+    <label class="check"><input type="checkbox" id="geoFollow" checked> 現在地を常に地図の中心に保つ（手で動かすと 15 秒止まる）</label>
+    <div class="row"><button class="btn" id="geoCenter">いますぐ現在地を中心に</button></div>
+    <div class="note">地図右上の 3 つのボタン（上から：現在地を使う／常に中心に保つ／いますぐ中心に）でも同じ操作ができます。</div>
     <div class="field">
       <label class="label" for="geoRate">位置の更新</label>
       <select id="geoRate">
@@ -431,27 +434,28 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     } catch (e) { /* some mobile browsers only allow notifications from a service worker */ }
   }
 
-  // using the location = following it (paused for 15 s after the user drags the map)
-  const following = () => track.watch !== null;
+  // geoOn: watching the location. following: also keep it centered (paused for 15 s after a drag).
+  const geoOn = () => track.watch !== null;
+  const following = () => geoOn() && $("geoFollow").checked;
   // geoRate: minimum seconds between applied updates (0 = every fix, never older than the fix itself)
   const geoRate = () => +$("geoRate").value;
   function onFix(p, quick) {
     const now = Date.now();
     if (quick && track.precise) return; // the quick coarse fix arrived after a precise one
     if (!quick && track.precise && now - track.lastFix < geoRate() * 1000 - 200) return;
-    const first = !track.precise && !track.lastFix;
+    const first = !track.precise && !track.lastFix && following();
     track.lastFix = now; if (!quick) track.precise = true;
     setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false);
     if (first && $("autoZoom").checked) map.setView([p.coords.latitude, p.coords.longitude], Math.max(map.getZoom(), 14));
   }
   function startGeo() {
-    if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; return; }
+    if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; geoCtl.update(); return; }
     track.lastUser = 0; track.lastFix = 0; track.precise = false;
     if (!window.isSecureContext) $("geoStatus").textContent = "https か localhost で開いていないため、現在地を取得できない可能性があります。";
     else $("geoStatus").textContent = "現在地を取得しています…";
-    if (track.pos && !track.pos.simulated) map.panTo([track.pos.lat, track.pos.lng]); // last known, right away
+    if (track.pos && !track.pos.simulated && $("geoFollow").checked) map.panTo([track.pos.lat, track.pos.lng]); // last known, right away
     // a quick (possibly cached / network-based) fix first, then the precise watch below takes over
-    navigator.geolocation.getCurrentPosition((p) => { if (following()) onFix(p, true); }, () => {},
+    navigator.geolocation.getCurrentPosition((p) => { if (geoOn()) onFix(p, true); }, () => {},
       { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 });
     watchGeo();
     geoCtl.update();
@@ -469,7 +473,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("autoZoom").addEventListener("change", () => { try { localStorage.setItem("autoZoom", $("autoZoom").checked ? "1" : "0"); } catch (e) {} });
   $("geoRate").addEventListener("change", () => {
     try { localStorage.setItem("geoRate", $("geoRate").value); } catch (e) {}
-    if (following()) { navigator.geolocation.clearWatch(track.watch); track.precise = false; watchGeo(); }
+    if (geoOn()) { navigator.geolocation.clearWatch(track.watch); track.precise = false; watchGeo(); }
   });
   function stopGeo() {
     if (track.watch !== null) navigator.geolocation.clearWatch(track.watch);
@@ -479,11 +483,21 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
   function jumpToMe() {
     if (track.pos) { track.lastUser = 0; map.panTo([track.pos.lat, track.pos.lng]); }
-    else if (!following()) startGeo(); // nothing to jump to yet: start using the location
+    else if (!geoOn()) startGeo(); // nothing to jump to yet: start using the location
   }
+  function setFollow(on) {
+    $("geoFollow").checked = on;
+    try { localStorage.setItem("geoFollow", on ? "1" : "0"); } catch (e) {}
+    if (on && track.pos) { track.lastUser = 0; map.panTo([track.pos.lat, track.pos.lng]); }
+    geoCtl.update();
+  }
+  $("geoUse").addEventListener("change", () => $("geoUse").checked ? startGeo() : stopGeo());
+  $("geoFollow").addEventListener("change", () => setFollow($("geoFollow").checked));
+  $("geoCenter").addEventListener("click", jumpToMe);
   // map buttons: [use location / follow] [jump to current position]
+  const ICON_USE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 22s7-6.6 7-12.2A7 7 0 0 0 5 9.8C5 15.4 12 22 12 22z"/><circle cx="12" cy="9.8" r="2.6" fill="currentColor"/></svg>';
+  const ICON_FOLLOW = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3 3 10.5l7.5 2.9L13.4 21z"/></svg>';
   const ICON_GEO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>';
-  const ICON_JUMP = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3 3 10.5l7.5 2.9L13.4 21z"/></svg>';
   const geoCtl = L.control({ position: "topright" });
   geoCtl.onAdd = () => {
     const box = L.DomUtil.create("div", "leaflet-bar geo-ctl");
@@ -492,18 +506,23 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); fn(); });
       return a;
     };
-    geoCtl.geo = mk(ICON_GEO, () => following() ? stopGeo() : startGeo());
-    geoCtl.jump = mk(ICON_JUMP, jumpToMe);
+    geoCtl.geo = mk(ICON_USE, () => geoOn() ? stopGeo() : startGeo());
+    geoCtl.follow = mk(ICON_FOLLOW, () => setFollow(!$("geoFollow").checked));
+    geoCtl.jump = mk(ICON_GEO, jumpToMe);
     L.DomEvent.disableClickPropagation(box);
     return box;
   };
   geoCtl.update = () => {
-    const on = following();
+    const on = geoOn(), fol = $("geoFollow").checked;
+    $("geoUse").checked = on;
     geoCtl.geo.classList.toggle("on", on);
-    geoCtl.geo.title = on ? "現在地を使っています（押すと止める）" : "現在地を使う（地図が追従します）";
-    geoCtl.geo.setAttribute("aria-label", geoCtl.geo.title); geoCtl.geo.setAttribute("aria-pressed", String(on));
-    geoCtl.jump.title = track.pos ? "現在地へ移動" : "現在地へ移動（現在地の取得を始めます）";
-    geoCtl.jump.setAttribute("aria-label", geoCtl.jump.title);
+    geoCtl.geo.title = on ? "現在地を使っています（押すと止める）" : "現在地を使う";
+    geoCtl.geo.setAttribute("aria-pressed", String(on));
+    geoCtl.follow.classList.toggle("on", fol && on); geoCtl.follow.classList.toggle("armed", fol && !on);
+    geoCtl.follow.title = fol ? "現在地を常に中心に保つ：オン（押すとオフ）" : "現在地を常に中心に保つ：オフ（押すとオン）";
+    geoCtl.follow.setAttribute("aria-pressed", String(fol));
+    geoCtl.jump.title = track.pos ? "いますぐ現在地を中心に" : "いますぐ現在地を中心に（現在地の取得を始めます）";
+    for (const a of [geoCtl.geo, geoCtl.follow, geoCtl.jump]) a.setAttribute("aria-label", a.title);
   };
   geoCtl.addTo(map); geoCtl.update();
   setInterval(() => { // periodic re-centering
@@ -764,8 +783,10 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   try {
     $("vor1").checked = localStorage.getItem("vor1") === "1";
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
+    $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
   } catch (e) {}
+  geoCtl.update();
   buildStyleBox();
   loadRows(EMBED.rows, EMBED.version);
   if (hp.get("id")) { const i = st.rows.findIndex(r => r[0] === +hp.get("id")); if (i >= 0) select(i, true); }
