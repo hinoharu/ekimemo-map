@@ -6,12 +6,14 @@ Usage:
   python3 scripts/build.py --fetch    # download the latest main-dataset stations and lines first, then build
                                       # (falls back to the files in data/ if a download fails)
 
-Outputs: dist/index.html (stations embedded) and dist/lines.json (railway lines, loaded by the page
-only when the railways are drawn), plus build/stations.json for the tests.
+Outputs: dist/index.html (stations embedded), dist/lines.json (railway lines, loaded by the page
+only when the railways are drawn) and dist/sw.js (service worker for offline use), plus
+build/stations.json for the tests.
 
 Only the Python standard library is used.
 """
 import csv
+import hashlib
 import io
 import json
 import shutil
@@ -159,6 +161,14 @@ def main():
         shutil.copyfile(DATA / "lines.json", DIST / "lines.json")
     else:
         print("WARNING: data/lines.json not found; railways cannot be drawn (run with --fetch)", file=sys.stderr)
+    # service worker: the build hash renames its page cache, so a new build replaces the old copy
+    h = hashlib.sha256(html.encode("utf-8"))
+    if (DIST / "lines.json").exists():
+        h.update((DIST / "lines.json").read_bytes())
+    sw = (SRC / "sw.js").read_text(encoding="utf-8")
+    if sw.count("/*BUILD*/") != 1:
+        sys.exit("src/sw.js must contain exactly one /*BUILD*/")
+    (DIST / "sw.js").write_text(sw.replace("/*BUILD*/", h.hexdigest()[:12]), encoding="utf-8")
     # rows as JSON for tests (not deployed)
     (ROOT / "build").mkdir(exist_ok=True)
     (ROOT / "build" / "stations.json").write_text(data, encoding="utf-8")
