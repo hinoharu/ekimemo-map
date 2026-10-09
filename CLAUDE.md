@@ -20,11 +20,11 @@
 | `src/station_core.js` | アルゴリズム本体。UI に依存しない純粋な関数。Node からも `require` できる |
 | `src/index.template.html` | 画面・操作・Leaflet 連携。`/*CORE*/` `/*DATA*/` `/*VERSION*/` をビルドで置換 |
 | `src/sw.js` | Service Worker（オフライン対応）。ビルドで `/*BUILD*/` をビルドのハッシュに置き換えて `dist/sw.js` に出力 |
-| `scripts/build.py` | 上の2つと `data/station.csv` を組み立てて `dist/index.html` を作る |
+| `scripts/build.py` | 上の2つと `data/station.csv` を組み立てて `dist/index.html` を作る。`data/lines.json` を `dist/` にコピーし、`src/sw.js` から `dist/sw.js` を作る。`--fetch` で駅データと路線データを取得 |
 | `data/station.csv`, `data/VERSION` | 駅データのスナップショット（オフラインでも再現できるようにコミットしている） |
 | `data/lines.json` | 路線の線形（station_database の `out/main/polyline/*.json` を約 10 m の誤差で簡略化）とラインカラー。`build.py --fetch` で更新し、`dist/lines.json` として公開する（ページは鉄道の線を表示するときだけ読み込む） |
 | `tests/verify.js` | 総当たりの順位計算と照合する正しさのテスト＋速度表示 |
-| `tests/check_html.js` | ビルド結果のプレースホルダ残りと、インラインスクリプトの構文チェック |
+| `tests/check_html.js` | ビルド結果のプレースホルダ残りと、インラインスクリプトの構文チェック。`dist/lines.json` と `dist/sw.js` も確認 |
 | `.github/workflows/pages.yml` | push 時にビルド→テスト→公開。週1回は最新データを取得して公開 |
 | `HANDOFF.md` | 作業の引き継ぎメモ（現在の状況・これまでの PR・計測値・残課題）。こまめに更新する |
 
@@ -35,7 +35,7 @@
 ```sh
 npm run build        # dist/index.html を作る（data/station.csv をそのまま使う）
 npm run build:fetch  # 最新の station.csv と路線の線形を取得して data/ を更新してからビルド
-npm test             # check_html + verify（約30秒）。変更後は必ず通すこと
+npm test             # check_html + verify（実測 約10秒）。変更後は必ず通すこと
 npm run test:quick   # 速い版（Actions でも使用）
 npm run serve        # http://localhost:8000/ で確認（位置情報は localhost なら使える）
 node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
@@ -177,7 +177,7 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 ## 既知の制限・今後の候補
 - スマホのブラウザでは、バックグラウンドに回ると位置の更新と通知が止まる（Web の制約）。
 - Android の Chrome は、ページから直接 `new Notification` を出せないことがある（service worker が必要）。今は画面内の通知と振動で代用している。
-- 候補：service worker による PWA 化（オフライン・通知）、レーダー範囲を多角形で塗り分ける表示、通知した地点の履歴、ゲーム本体の距離計算との照合。
+- 候補：service worker による通知（オフライン対応は #17 で実装済み）、通知した地点の履歴、ゲーム本体の距離計算との照合。
 
 ### 改善が必要な点（2026-10 の点検で見つけたもの。直したら消す）
 1. URL ハッシュが状態を再現しきれない：距離方式の変更・スライダーでの k 変更ではハッシュが更新されず、計算範囲（clip）はハッシュに含まれない。
@@ -185,6 +185,6 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 3. 週1回の最新データ取得の結果がリポジトリに戻らないため、その後の push で `data/station.csv` の古いスナップショットに戻って公開される。公開リポジトリは 60 日間活動がないと schedule が止まる。
 4. `traceLevel` の最後の手段（`force`）は閉じていない多角形でも黙って返す。画面にもテストにも失敗が伝わらない（現データでは未発生）。
 5. 地図クリック時の順位計算が `rankAt` の複製になっている。
-6. 本ファイルの細部：球面で clip=0 は「全国の枠」ではなく心射図法 ±30°。球面の窓は角距離でおよそ ±clipDeg で、経度方向は ±clipDeg 度より広い。`npm test` は実測 約10秒。ファイル表に `HANDOFF.md` がない。README の公開 URL がプレースホルダのまま。
+6. 本ファイルの細部：球面で clip=0 は「全国の枠」ではなく心射図法 ±30°。球面の窓は角距離でおよそ ±clipDeg で、経度方向は ±clipDeg 度より広い。README の公開 URL がプレースホルダのまま。
 7. ブラウザでの CSV 再取得：緯度経度が数値でない行を弾いていない。`closed` が `True` のとき `build.py` と判定が違う。
 8. `.github/workflows/pages.yml` の各 action が Node 20 版（Node 24 対応版へ更新。`runs-on` の固定も検討）。
