@@ -351,14 +351,14 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     st.styledSel = st.sel;
   }
   // ring around the selected station (non-interactive, so taps still reach the dot below it)
-  const SEL_RING = 12;
+  const SEL_RING = 10.5; // ring centre line: colored 9–12 px, white 8–13 px; the gap to the dot (r 7) ≈ the ring width
   let selRing = null;
   function placeSelRing() {
     if (selRing) { stationLayer.removeLayer(selRing[0]); stationLayer.removeLayer(selRing[1]); selRing = null; }
     if (st.sel < 0 || !st.rows[st.sel]) return;
     const r = st.rows[st.sel], ll = [r[4], r[5]], col = stationStyle(st.sel).fillColor;
-    selRing = [L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: "#fff", weight: 6, fill: false, interactive: false }),
-               L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: col, weight: 2.5, fill: false, interactive: false })];
+    selRing = [L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: "#fff", weight: 5, fill: false, interactive: false }),
+               L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: col, weight: 3, fill: false, interactive: false })];
     selRing.forEach(c => c.addTo(stationLayer));
   }
   function restyleStation(i) { if (i >= 0 && markers[i]) { markers[i].setStyle(stationStyle(i)); markers[i].setTooltipContent(stationTip(i)); } }
@@ -431,44 +431,25 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
 
   // ---------------- station names
-  // Names are placed greedily so that they overlap neither each other nor any dot: for each station
-  // (selected, unacquired, then nearest to the screen center first) try 8 positions around its dot and
-  // take the first free one; a name that fits nowhere is left out (the selected one is always shown).
-  const measureCtx = document.createElement("canvas").getContext("2d");
-  function textWidth(text, px) {
-    measureCtx.font = `700 ${px}px ${getComputedStyle(document.body).fontFamily}`;
-    return measureCtx.measureText(text).width;
-  }
+  // Names sit at a fixed place right of the dot (no collision search: lightness first, nothing left out).
+  // The dots' pane is above the labels, so a name never hides a dot.
   function updateLabels() {
     labelLayer.clearLayers();
     if (!$("showNames").checked || map.getZoom() < 12 || !st.rows.length) return;
-    const b = map.getBounds().pad(0.05), ids = [];
+    const b = map.getBounds(), ids = [];
     for (let i = 0; i < st.rows.length; i++) if (b.contains([st.rows[i][4], st.rows[i][5]])) ids.push(i);
     if (st.sel >= 0 && !ids.includes(st.sel)) ids.push(st.sel);
     if (ids.length > 450) return; // too crowded to read; zoom in
-    const c = map.getSize().divideBy(2);
-    const pt = new Map(ids.map(i => [i, map.latLngToContainerPoint([st.rows[i][4], st.rows[i][5]])]));
-    const rad = (i) => i === st.sel ? SEL_RING + 2 : isUa(i) ? 5.5 : 4;
-    const boxes = ids.map(i => { const p = pt.get(i), r = rad(i); return [p.x - r, p.y - r, p.x + r, p.y + r]; }); // dots
-    const free = (x0, y0, x1, y1) => boxes.every(q => x1 <= q[0] || x0 >= q[2] || y1 <= q[1] || y0 >= q[3]);
-    const order = ids.slice().sort((a, z) => (z === st.sel) - (a === st.sel) || isUa(z) - isUa(a) || pt.get(a).distanceTo(c) - pt.get(z).distanceTo(c));
-    for (const i of order) {
-      const r = st.rows[i], on = i === st.sel, px = on ? 14 : 12, h = on ? 17 : 15;
-      const w = textWidth(r[2], px) + 4, p = pt.get(i), g = rad(i) + 1;
-      const cand = [[g, -h / 2], [-g - w, -h / 2], [g - 2, -h - g + 4], [g - 2, g - 4], [-w / 2, -h - g], [-w / 2, g], [-w - g + 2, -h - g + 4], [-w - g + 2, g - 4]];
-      let pos = cand.find(([dx, dy]) => free(p.x + dx, p.y + dy, p.x + dx + w, p.y + dy + h));
-      if (!pos) { if (!on) continue; pos = cand[0]; }
-      boxes.push([p.x + pos[0], p.y + pos[1], p.x + pos[0] + w, p.y + pos[1] + h]);
-      const cls = "lbl" + (on ? " on" : "") + (r[6] ? " closed" : "") + (isUa(i) ? " ua" : "");
+    for (const i of ids) {
+      const r = st.rows[i], on = i === st.sel, ua = isUa(i), cls = "lbl" + (on ? " on" : "") + (r[6] ? " closed" : "") + (ua ? " ua" : "");
       L.marker([r[4], r[5]], {
-        icon: L.divIcon({ className: "lbl-wrap", html: `<span class="${cls}">${esc(r[2])}</span>`, iconSize: null, iconAnchor: [-pos[0] - 2, -pos[1]] }),
+        icon: L.divIcon({ className: "lbl-wrap", html: `<span class="${cls}">${esc(r[2])}</span>`, iconSize: null, iconAnchor: on ? [-15, 9] : ua ? [-7, 8] : [-6, 8] }),
         interactive: false, keyboard: false,
       }).addTo(labelLayer);
     }
   }
   map.on("moveend", updateLabels);
   $("showNames").addEventListener("change", updateLabels);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateLabels); // widths change once the web font is in
 
   // ---------------- current position, tracking and notifications
   const track = { pos: null, watch: null, prev: null, lastUser: 0, me: null, acc: null, lastFix: 0, precise: false };
