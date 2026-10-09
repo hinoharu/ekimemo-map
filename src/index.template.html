@@ -360,15 +360,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // A canvas renderer that keeps its drawing on small pans: while the zoom is unchanged and the padded area it
   // drew last still covers the view, moveend does nothing (layer coordinates do not change while panning).
   // Plain L.Canvas resizes, clears and redraws everything after every pan, which was the main cost of panning.
+  // The pixel origin must also be unchanged: a long jump (e.g. from a list) resets the view, which moves the
+  // origin of layer coordinates, and the old bounds could then "cover" the new view by coincidence (stale drawing).
   const StickyCanvas = L.Canvas.extend({
     _update() {
       const m = this._map;
-      if (m && this._bounds && !m._animatingZoom && this._zoom === m.getZoom() && this._size && this._size.equals(m.getSize())) {
+      if (m && this._bounds && !m._animatingZoom && this._zoom === m.getZoom() && this._size && this._size.equals(m.getSize())
+          && this._origin && this._origin.equals(m.getPixelOrigin())) {
         const v = L.bounds(m.containerPointToLayerPoint([0, 0]), m.containerPointToLayerPoint(m.getSize()));
         if (this._bounds.contains(v)) return;
       }
       L.Canvas.prototype._update.call(this);
-      this._size = m && m.getSize();
+      this._size = m && m.getSize(); this._origin = m && m.getPixelOrigin();
     },
   });
   const RailCanvas = StickyCanvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawRail(); } });
@@ -682,13 +685,13 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   let nameDrawn = null; // { zoom, bounds (layer px) } of the last drawing
   function updateLabelsOnMove() { // skip while the last drawing still covers the view (same zoom)
     const v = L.bounds(map.containerPointToLayerPoint([0, 0]), map.containerPointToLayerPoint(map.getSize()));
-    if (nameDrawn && nameDrawn.zoom === map.getZoom() && nameDrawn.bounds.contains(v)) return;
+    if (nameDrawn && nameDrawn.zoom === map.getZoom() && nameDrawn.origin.equals(map.getPixelOrigin()) && nameDrawn.bounds.contains(v)) return;
     updateLabels();
   }
   function updateLabels() {
     const view = map.getSize(), off = view.multiplyBy(NAME_PAD).round(), size = view.add(off.multiplyBy(2));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    nameDrawn = { zoom: map.getZoom(), bounds: L.bounds(map.containerPointToLayerPoint(off.multiplyBy(-1)), map.containerPointToLayerPoint(view.add(off))) };
+    nameDrawn = { zoom: map.getZoom(), origin: map.getPixelOrigin(), bounds: L.bounds(map.containerPointToLayerPoint(off.multiplyBy(-1)), map.containerPointToLayerPoint(view.add(off))) };
     if (nameCanvas.width !== Math.round(size.x * dpr) || nameCanvas.height !== Math.round(size.y * dpr)) {
       nameCanvas.width = Math.round(size.x * dpr); nameCanvas.height = Math.round(size.y * dpr);
       nameCanvas.style.width = size.x + "px"; nameCanvas.style.height = size.y + "px";

@@ -5,7 +5,7 @@
 
 ## 現在の状況（2026-10-09 時点）
 - 作業ブランチ：`claude/dazzling-johnson-pmcvrg`（マージのたびに main から作り直す）
-- **進行中**：なし（ユーザーの次の依頼待ち）。この記録の更新は次の PR に含める。
+- **進行中**：未取得駅の一覧から遠くへジャンプしたとき、前の場所の駅名などが残る不具合の修正（`StickyCanvas` と駅名の描き直し省略の判定に、地図の内部座標の原点 `getPixelOrigin()` の一致を追加）。PR を作ってマージの可否を確認するところ。
 - 直近：[hinoharu/ekimemo-map#19](https://github.com/hinoharu/ekimemo-map/pull/19)（メニューを開いたまま駅を選んでも、メニューに隠れない所に表示。`visibleArea` / `fitVisible`）をマージ済み。
 - 直近：[hinoharu/ekimemo-map#17](https://github.com/hinoharu/ekimemo-map/pull/17)（タイルの読み込みの改善、Service Worker によるオフライン対応、地理院タイルの保存、設定が交互に消える不具合の修正）をマージ済み。公開後、ユーザーにオフラインでの動き（機内など）と、地理院タイルが実際に保存されるか（パネルの保存枚数）を見てもらう。保存枚数が増えない場合は、地理院のサーバーが CORS を返していない可能性がある。
 
