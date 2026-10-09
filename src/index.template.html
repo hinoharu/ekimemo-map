@@ -946,11 +946,16 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
   $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; cancelAsync("view"); viewLayer.clearLayers(); } });
   $("showClosed").addEventListener("change", () => applyFilter(true));
+  function setFolded(c) {
+    $("panel").classList.toggle("collapsed", c);
+    $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+  }
   $("fold").addEventListener("click", () => {
-    const p = $("panel"); p.classList.toggle("collapsed");
-    const c = p.classList.contains("collapsed"); $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+    setFolded(!$("panel").classList.contains("collapsed"));
     if (following() && track.pos && !paused()) centerOn(track.pos.lat, track.pos.lng);
   });
+  // phones: the panel is a bottom sheet over half the map, so it starts folded (wide screens: open)
+  if (window.matchMedia("(max-width: 640px)").matches) setFolded(true);
 
   // search
   const kataToHira = (s) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
