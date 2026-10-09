@@ -672,13 +672,44 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
 
   // order-k diagram for stations in view (async, capped)
+  // Stations whose R_k can reach the view (not just stations on screen: zoomed in far from any
+  // station, the boundaries crossing the screen belong to stations outside it).
+  // If x in the view lies in R_k(t), then d(x,t) <= d_k(x) <= max_j d(x, s_j) for the k stations s_j
+  // nearest the center, and max over the view of that convex function is at a corner. So every such t
+  // is within D = max over corners and s_j of d(corner, s_j) of the view rectangle.
+  // Distances in a plane matching the metric (sphere: local equirectangular, with a margin).
+  function stationsForView(k, pad) {
+    const b = map.getBounds().pad(pad), c = map.getCenter(), n = st.rows.length;
+    const fx = st.metric === "flat" ? 1 : st.metric === "cos" ? COS36 : Math.cos(c.lat * DEG);
+    const margin = st.metric === "sphere" ? 1.15 : 1;
+    const S = b.getSouth(), N = b.getNorth(), W = b.getWest(), E = b.getEast();
+    const near = []; // k nearest to the center under the metric (insertion into a short sorted list)
+    for (let t = 0; t < n; t++) {
+      const d = distKey(st.idx, st.metric, c.lat, c.lng, t);
+      if (near.length < k || d < near[near.length - 1][0]) {
+        let q = near.length < k ? near.length : k - 1;
+        if (near.length < k) near.push(null);
+        while (q > 0 && near[q - 1][0] > d) { near[q] = near[q - 1]; q--; }
+        near[q] = [d, t];
+      }
+    }
+    let D = 0;
+    for (const [la, lo] of [[S, W], [S, E], [N, W], [N, E]])
+      for (const [, t] of near) D = Math.max(D, Math.hypot((st.rows[t][5] - lo) * fx, st.rows[t][4] - la));
+    D = D * margin + 1e-9;
+    const ids = [], dc = new Map();
+    for (let t = 0; t < n; t++) {
+      const la = st.rows[t][4], lo = st.rows[t][5];
+      const dx = (lo < W ? W - lo : lo > E ? lo - E : 0) * fx, dy = la < S ? S - la : la > N ? la - N : 0;
+      if (Math.hypot(dx, dy) <= D) { ids.push(t); dc.set(t, ((lo - c.lng) * fx) ** 2 + (la - c.lat) ** 2); }
+    }
+    return ids.sort((a, z) => dc.get(a) - dc.get(z)); // nearest to the center first (callers cap the count)
+  }
+
   function drawView() {
     const job = ++st.viewJob; viewLayer.clearLayers();
     if (!$("viewAll").checked) return;
-    const b = map.getBounds().pad(0.1), c = map.getCenter();
-    const ids = [];
-    st.rows.forEach((r, i) => { if (b.contains([r[4], r[5]])) ids.push(i); });
-    ids.sort((a, z) => (st.rows[a][4] - c.lat) ** 2 + (st.rows[a][5] - c.lng) ** 2 - (st.rows[z][4] - c.lat) ** 2 - (st.rows[z][5] - c.lng) ** 2);
+    const ids = stationsForView(st.k, 0.1);
     const CAP = 800, todo = ids.slice(0, CAP);
     let q = 0;
     const step = () => {
@@ -698,11 +729,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function drawVor() {
     const job = ++st.vorJob; vorLayer.clearLayers();
     if (!$("vor1").checked) return;
-    const b = map.getBounds().pad(0.2), c = map.getCenter();
-    const ids = [];
-    st.rows.forEach((r, i) => { if (b.contains([r[4], r[5]])) ids.push(i); });
-    ids.sort((a, z) => (st.rows[a][4] - c.lat) ** 2 + (st.rows[a][5] - c.lng) ** 2 - (st.rows[z][4] - c.lat) ** 2 - (st.rows[z][5] - c.lng) ** 2);
-    const todo = ids.slice(0, 3000); // zoomed far out: only around the center
+    const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
     let q = 0;
     const step = () => {
       if (job !== st.vorJob) return;
