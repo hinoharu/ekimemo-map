@@ -52,8 +52,10 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 @media (min-width: 641px) { #nearBox { left: 380px; } }
 .radar { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12.5px; max-height: 260px; overflow: auto; }
 .radar li { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 6px; align-items: center; }
-.radar .no { justify-self: center; min-width: 1.7em; text-align: center; color: #fff; border-radius: 9px; font-size: 11px; font-weight: 700; line-height: 17px; }
-.radar .no.sq { border-radius: 3px; background: #fff !important; border: 1.5px solid; }
+.radar .no { justify-self: center; width: 17px; height: 17px; box-sizing: border-box; text-align: center; color: #fff; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 17px; }
+.radar .no i { font-style: normal; display: inline-block; }
+.radar .no i.n2 { transform: scaleX(0.72); } .radar .no i.n3 { transform: scaleX(0.52); } /* condensed: same circle as one digit */
+.radar .no.sq { border-radius: 3px; background: #fff !important; border: 1.5px solid; line-height: 14px; }
 .radar .d { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .radar .sep { grid-template-columns: 1fr; color: var(--muted); font-size: 11.5px; margin-top: 4px; }
 #fold .fold-ico { display: none; }
@@ -62,6 +64,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 @media (max-width: 640px) {
   body.compact .leaflet-control-layers { display: none; }
   body.compact .leaflet-top.leaflet-left .leaflet-control-zoom { margin-top: 40px; margin-left: 6px; }
+  body.compact .leaflet-top.leaflet-left .view-ctl { margin-top: 6px; margin-left: 6px; }
   body.compact .leaflet-top.leaflet-right .leaflet-control { margin-top: 6px; margin-right: 6px; }
   body.compact .geo-ctl a { width: 30px; height: 30px; }
   body.compact .geo-ctl a svg { width: 17px; height: 17px; }
@@ -163,7 +166,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .geo-ctl a svg { width: 20px; height: 20px; }
 .geo-ctl a.on { background: var(--region); color: #fff; }
 .geo-ctl a.on:hover { background: #174b86; }
-.geo-ctl a.armed { color: var(--region); } /* follow is on but the location is not in use */
+.geo-ctl a.armed { color: var(--region); }
+.geo-ctl a[hidden] { display: none; } /* follow is on but the location is not in use */
 </style>
 </head>
 <body>
@@ -387,6 +391,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ---------------- map
   const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([35.68, 139.76], 11);
   const zoomCtl = L.control.zoom({ position: "topright" }).addTo(map);
+  const viewCtl = L.control({ position: "topright" }); // view buttons (rank numbers, three-fold, clear); built below
   const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
   // load tiles while the map is still moving (Leaflet's default on phones waits until it stops) and keep
   // 4 rows of tiles beyond the screen, so going back and forth does not reload them
@@ -403,7 +408,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     attribution: 'Data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Style: <a href="https://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA 2.0</a> <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>',
   });
   BASES.osm[1].addTo(map);
-  L.control.layers(Object.fromEntries(Object.values(BASES)), null, { position: "topright" }).addTo(map);
+  const layersCtl = L.control.layers(Object.fromEntries(Object.values(BASES)), null, { position: "topright" }).addTo(map);
 
   // ---------------- railway lines: station_database shapes drawn by us (no names, no bridge/tunnel styling)
   // dist/lines.json is fetched only when the lines are first shown. Points are converted once to normalised
@@ -588,13 +593,16 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `700 10px ${getComputedStyle(document.body).fontFamily}`;
     for (const [list, square] of lists) for (const [i, rank] of list) {
       const r = st.rows[i]; if (!r || !llb.contains([r[4], r[5]])) continue;
-      const p = map.latLngToLayerPoint([r[4], r[5]]), x = p.x - 10, y = p.y - 10, w = rank >= 10 ? 17 : 14, c = TIER[tierOf(rank)];
+      const p = map.latLngToLayerPoint([r[4], r[5]]), x = p.x - 10, y = p.y - 10, w = 14, c = TIER[tierOf(rank)];
       ctx.beginPath();
       if (square) ctx.roundRect ? ctx.roundRect(x - w / 2, y - 7, w, 14, 2.5) : ctx.rect(x - w / 2, y - 7, w, 14);
       else ctx.roundRect ? ctx.roundRect(x - w / 2, y - 7, w, 14, 7) : ctx.arc(x, y, 7, 0, 2 * Math.PI);
       ctx.fillStyle = square ? "#fff" : c; ctx.fill();
       ctx.lineWidth = square ? 1.6 : 1.2; ctx.strokeStyle = square ? c : "#fff"; ctx.stroke();
-      ctx.fillStyle = square ? c : "#fff"; ctx.fillText(String(rank), x, y + 0.5);
+      // two or three digits are condensed (narrower glyphs), so every badge is the same circle / square
+      ctx.fillStyle = square ? c : "#fff";
+      if (rank < 10) ctx.fillText(String(rank), x, y + 0.5);
+      else { ctx.save(); ctx.translate(x, y + 0.5); ctx.scale(rank < 100 ? 0.72 : 0.52, 1); ctx.fillText(String(rank), 0, 0); ctx.restore(); }
     }
     ctx.textAlign = "start";
   }
@@ -728,7 +736,14 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function redraw(fly) {
     regionLayer.clearLayers(); levelLayer.clearLayers();
     drawDots();
-    if (st.sel < 0) return;
+    if (viewCtl.update) viewCtl.update();
+    if (st.sel < 0) { // nothing selected (cleared)
+      $("selbox").innerHTML = '<div class="note">駅を選んでいません。地図の駅をタップするか、上の欄で検索してください。</div>';
+      st.levelJob++; cancelAsync("lv");
+      drawUaAreas(); updateLabels();
+      track.prev = null; if (track.pos) evaluate(false);
+      return;
+    }
     const r = st.rows[st.sel];
     const t0 = performance.now();
     const R = region(st.sel, st.k);
@@ -998,7 +1013,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const R = track.radar, ol = $("radarList");
     if (!R || !$("radarMarks").checked) { ol.hidden = true; return; }
     const row = (i, rank, sq) => { const r = st.rows[i], c = TIER[tierOf(rank)];
-      return `<li><span class="no${sq ? " sq" : ""}" style="${sq ? `color:${c};border-color:${c}` : `background:${c}`}">${rank}</span><span${isUa(i) ? ' style="color:var(--ua)"' : ""}>${esc(r[2])}</span><span class="d">${km(lat, lng, r[4], r[5])}</span></li>`; };
+      return `<li><span class="no${sq ? " sq" : ""}" style="${sq ? `color:${c};border-color:${c}` : `background:${c}`}"><i class="${rank >= 100 ? "n3" : rank >= 10 ? "n2" : ""}">${rank}</i></span><span${isUa(i) ? ' style="color:var(--ua)"' : ""}>${esc(r[2])}</span><span class="d">${km(lat, lng, r[4], r[5])}</span></li>`; };
     let html = `<li class="sep">${track.pos && track.pos.simulated ? "指定位置" : "現在地"}からレーダーに入る ${st.k} 駅</li>` + R.fromPos.map(([i, q]) => row(i, q, false)).join("");
     if ($("stnMarks").checked && R.fromStnNew.length)
       html += `<li class="sep">${esc(st.rows[R.near][2])}（位置登録した駅）から数えると新たに入る駅</li>` + R.fromStnNew.map(([i, q]) => row(i, q, true)).join("");
@@ -1135,6 +1150,41 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     for (const a of [geoCtl.geo, geoCtl.follow, geoCtl.jump]) a.setAttribute("aria-label", a.title);
   };
   geoCtl.addTo(map); geoCtl.update();
+  // map buttons for the view: [rank numbers] [three-fold view] [clear the selection] (the same as the panel's items)
+  const ICON_MARKS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M10 9.2 12.6 7.5V16.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const ICON_TRIPLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="6" stroke-dasharray="3 2"/><circle cx="12" cy="12" r="2.5" stroke-dasharray="1 1.6"/></svg>';
+  const ICON_CLEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3 2.4"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/></svg>';
+  viewCtl.onAdd = () => {
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl view-ctl");
+    const mk = (html, fn) => {
+      const a = L.DomUtil.create("a", "", box); a.href = "#"; a.setAttribute("role", "button"); a.innerHTML = html;
+      L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); fn(); });
+      return a;
+    };
+    const flip = (id) => { const e = $(id); e.checked = !e.checked; e.dispatchEvent(new Event("change")); viewCtl.update(); };
+    viewCtl.marks = mk(ICON_MARKS, () => flip("radarMarks"));
+    viewCtl.triple = mk(ICON_TRIPLE, () => flip("triple"));
+    viewCtl.clear = mk(ICON_CLEAR, clearSel);
+    L.DomEvent.disableClickPropagation(box);
+    return box;
+  };
+  viewCtl.update = () => {
+    if (!viewCtl.marks) return;
+    const m = $("radarMarks").checked, t = $("triple").checked;
+    viewCtl.marks.classList.toggle("on", m); viewCtl.marks.setAttribute("aria-pressed", String(m));
+    viewCtl.marks.title = `レーダーに入る駅に順位の番号：${m ? "オン" : "オフ"}`;
+    viewCtl.triple.classList.toggle("on", t); viewCtl.triple.setAttribute("aria-pressed", String(t));
+    viewCtl.triple.title = `三重表示（k・k−2・k−6）：${t ? "オン" : "オフ"}`;
+    viewCtl.clear.hidden = st.sel < 0; viewCtl.clear.title = "選んだ駅の選択を解除";
+    for (const a of [viewCtl.marks, viewCtl.triple, viewCtl.clear]) a.setAttribute("aria-label", a.title);
+  };
+  viewCtl.addTo(map);
+  function clearSel() {
+    st.sel = -1; $("q").value = "";
+    try { history.replaceState(null, "", `#k=${st.k}&m=${st.metric}`); } catch (e) {}
+    redraw(false);
+  }
+  for (const id of ["radarMarks", "triple"]) $(id).addEventListener("change", () => viewCtl.update());
   setInterval(() => { // periodic re-centering
     if (following() && track.pos && !paused()) {
       const c = map.getCenter();
@@ -1380,15 +1430,20 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const m = $("compactMode").value, on = m === "on" || (m === "auto" && shortMq.matches);
     if (document.body.classList.contains("compact") === on) return;
     document.body.classList.toggle("compact", on);
-    // zoom buttons: on the left (under the nearest station) in compact mode, else back to the top of the right column
-    zoomCtl.setPosition(on ? "topleft" : "topright");
-    if (!on) { const c = zoomCtl.getContainer(); c.parentNode.insertBefore(c, c.parentNode.firstChild); }
+    // zoom and view buttons: on the left (under the nearest station) in compact mode (the menu button is at the
+    // bottom right), else back to the right column
+    for (const c of [zoomCtl, viewCtl]) c.setPosition(on ? "topleft" : "topright");
+    arrangeControls();
     map.invalidateSize();
+  }
+  // right column, top to bottom: layers, zoom, location, view (the big layer button at the top, not in the middle)
+  function arrangeControls() {
+    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
   }
   try { const cm = localStorage.getItem("compactMode"); if (["auto", "on", "off"].includes(cm)) $("compactMode").value = cm; } catch (e) {}
   $("compactMode").addEventListener("change", () => { try { localStorage.setItem("compactMode", $("compactMode").value); } catch (e) {} applyCompact(); });
   shortMq.addEventListener ? shortMq.addEventListener("change", applyCompact) : shortMq.addListener(applyCompact);
-  applyCompact();
+  applyCompact(); arrangeControls();
 
   // search
   const kataToHira = (s) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
