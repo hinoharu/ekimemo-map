@@ -529,8 +529,10 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const r = st.rows[i], ua = isUa(i), sel = i === st.sel;
     return {
       radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
-      fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : (r[6] ? "#9aa0ad" : "#c2410c"),
-      fillOpacity: st.ua.size && !ua && !sel ? 0.5 : 0.95, // with a list loaded, acquired stations recede
+      // with a list loaded, acquired stations recede: a pale solid color (not a translucent fill, which blurred the dots
+      // and let the white rims of crowded dots read as rings)
+      fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : st.ua.size && !sel ? (r[6] ? "#c8ccd4" : "#eaa98b") : (r[6] ? "#9aa0ad" : "#c2410c"),
+      fillOpacity: 0.95,
     };
   }
   const stationTip = (i) => st.rows[i][2] + (st.rows[i][6] ? "（廃駅）" : "") + (isUa(i) ? "（未取得）" : "");
@@ -557,11 +559,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     // unacquired (larger) on top of the others
     const order = [...groups.values()].sort((a, z) => a.s.radius - z.s.radius);
     for (const { s, pts } of order) {
-      ctx.beginPath();
-      for (let k = 0; k < pts.length; k += 2) { ctx.moveTo(pts[k] + s.radius, pts[k + 1]); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); }
-      ctx.globalAlpha = s.fillOpacity; ctx.fillStyle = s.fillColor; ctx.fill();
-      // the white rim fades with the fill: at full strength, receded (acquired) dots in dense areas read as white rings
-      ctx.globalAlpha = s.fillOpacity < 0.9 ? 0.35 : 1; ctx.lineWidth = s.weight; ctx.strokeStyle = "#fff"; ctx.stroke();
+      // one dot at a time, white rim (double width, the outer half shows) then fill: overlapping dots (a station and the
+      // tram stop in front of it, a few px apart) stay separate dots. One path for all dots let a later rim cross an
+      // earlier fill (a ring); rims-then-fills merged them into one blob. Measured: no slower than one path per style.
+      ctx.lineWidth = s.weight * 2; ctx.strokeStyle = "#fff"; ctx.fillStyle = s.fillColor; ctx.globalAlpha = s.fillOpacity;
+      for (let k = 0; k < pts.length; k += 2) { ctx.beginPath(); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); ctx.stroke(); ctx.fill(); }
       ctx.globalAlpha = 1;
     }
     if (st.sel >= 0 && st.rows[st.sel]) { // the selected station: dot + ring, on top
