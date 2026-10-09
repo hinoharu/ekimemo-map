@@ -189,7 +189,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   L.control.layers({ "OpenStreetMap": osm, "地理院 淡色": gsi }, null, { position: "topright" }).addTo(map);
   map.attributionControl.addAttribution('駅データ: <a href="https://github.com/Seo-4d696b75/station_database">station_database</a> (CC BY 4.0)');
 
-  const canvasR = L.canvas({ padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
+  // Station dots get their own pane above the boundary lines. With preferCanvas, every canvas
+  // renderer is a full-map <canvas>; only the topmost one receives clicks, so the dots' canvas
+  // must be on top or tapping a station does nothing (non-hit clicks still reach the map).
+  map.createPane("stations").style.zIndex = 450;
+  const canvasR = L.canvas({ pane: "stations", padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
+  const lineR = L.canvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
   const stationLayer = L.layerGroup().addTo(map);
   const viewLayer = L.layerGroup().addTo(map);
   const levelLayer = L.layerGroup().addTo(map);
@@ -255,7 +260,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const t0 = performance.now();
     const R = region(st.sel, st.k);
     const ms = performance.now() - t0;
-    const poly = L.polygon(R.latlng, { color: "#1f5fa8", weight: 2, fillColor: "#1f5fa8", fillOpacity: 0.16, interactive: false });
+    const poly = L.polygon(R.latlng, { renderer: lineR, color: "#1f5fa8", weight: 2, fillColor: "#1f5fa8", fillOpacity: 0.16, interactive: false });
     poly.addTo(regionLayer);
     if (fly) map.fitBounds(poly.getBounds(), { padding: [40, 40], maxZoom: 13 });
     const area = sphericalArea(R.latlng);
@@ -402,7 +407,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       while (j < K && performance.now() - t < 24) {
         const R = region(i, j);
         const f = j / K;
-        L.polygon(R.latlng, { color: "#1f5fa8", weight: 1, opacity: 0.25 + 0.5 * (1 - f), fill: false, interactive: false }).addTo(levelLayer);
+        L.polygon(R.latlng, { renderer: lineR, color: "#1f5fa8", weight: 1, opacity: 0.25 + 0.5 * (1 - f), fill: false, interactive: false }).addTo(levelLayer);
         j++;
       }
       if (j < K) setTimeout(step, 0);
@@ -424,7 +429,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       if (job !== st.viewJob) return;
       const t = performance.now(), batch = [];
       while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], st.k).latlng); q++; }
-      if (batch.length) L.polygon(batch, { renderer: canvasR, color: "#3b4660", weight: 0.8, opacity: 0.45, fill: false, interactive: false }).addTo(viewLayer);
+      if (batch.length) L.polygon(batch, { renderer: lineR, color: "#3b4660", weight: 0.8, opacity: 0.45, fill: false, interactive: false }).addTo(viewLayer);
       if (q < todo.length) setTimeout(step, 0);
     };
     step();
