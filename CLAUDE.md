@@ -19,6 +19,7 @@
 |---|---|
 | `src/station_core.js` | アルゴリズム本体。UI に依存しない純粋な関数。Node からも `require` できる |
 | `src/index.template.html` | 画面・操作・Leaflet 連携。`/*CORE*/` `/*DATA*/` `/*VERSION*/` をビルドで置換 |
+| `src/sw.js` | Service Worker（オフライン対応）。ビルドで `/*BUILD*/` をビルドのハッシュに置き換えて `dist/sw.js` に出力 |
 | `scripts/build.py` | 上の2つと `data/station.csv` を組み立てて `dist/index.html` を作る |
 | `data/station.csv`, `data/VERSION` | 駅データのスナップショット（オフラインでも再現できるようにコミットしている） |
 | `data/lines.json` | 路線の線形（station_database の `out/main/polyline/*.json` を約 10 m の誤差で簡略化）とラインカラー。`build.py --fetch` で更新し、`dist/lines.json` として公開する（ページは鉄道の線を表示するときだけ読み込む） |
@@ -27,7 +28,7 @@
 | `.github/workflows/pages.yml` | push 時にビルド→テスト→公開。週1回は最新データを取得して公開 |
 | `HANDOFF.md` | 作業の引き継ぎメモ（現在の状況・これまでの PR・計測値・残課題）。こまめに更新する |
 
-`dist/`（`index.html` と `lines.json`）と `build/` は生成物です。手で編集せず、コミットもしません。
+`dist/`（`index.html`・`lines.json`・`sw.js`）と `build/` は生成物です。手で編集せず、コミットもしません。
 
 ## コマンド
 
@@ -104,8 +105,10 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 - テスト用：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなす。駅以外をクリックしたときの順位表示はデバッグ用で、パネル下部の `dbgRank` をオンにしたときだけ出る。
 - パネルの並び：駅 → k → 表示のチェック（最寄り駅の境界・駅名を先頭に）→ 選んだ駅の情報 → 現在地と通知 → 線の見た目 → 計算の設定（距離の測り方・計算範囲）→ データとデバッグ。見出し（「たたむ」）は `position: sticky` でスクロールしても隠れない。スマホ（幅 640 px 以下、パネルは下端のシート）では最初は畳んだ状態で開く。
 - 線の見た目：境界の種類（`sel` `vor` `view` `lv`）ごとに色・太さ・濃さ・線の種類を `st.style` に持ち、localStorage の `lineStyle` に保存する。変更は `restyle` で描画済みの線に `setStyle` する（再計算しない）。1〜k 位の境界は内側ほど濃く、外側は設定の 1/3 まで薄くする。
-- **鉄道の線**（`railMode`：表示しない／ラインカラー／1 色／OpenRailwayMap）：自前の線は `RailCanvas`（`DotCanvas` と同じ仕組み、pane `rail` z-index 395＝背景と塗りの上、境界線の下）の `_draw` で描く（`drawRail`）。`lines.json` は初めて表示するときに 1 回だけ読み込み、座標を正規化した Web Mercator（0〜1）に変換しておく。描画は、描く範囲にかかる区間だけ・色ごとに 1 本の path・1 px 未満の点は省く（スマホ相当の速さで全国表示でも 1 回 約 8 ms）。ラインカラーのない路線は灰色。色・太さ・濃さは localStorage の `mapLook` に保存。
+- **鉄道の線**（`railMode`：表示しない／ラインカラー／1 色／OpenRailwayMap）：自前の線は `RailCanvas`（`DotCanvas` と同じ仕組み、pane `rail` z-index 395＝背景と塗りの上、境界線の下）の `_draw` で描く（`drawRail`）。`lines.json` は初めて表示するときに 1 回だけ読み込み、座標を正規化した Web Mercator（0〜1）に変換しておく。描画は、描く範囲にかかる区間だけ・色ごとに 1 本の path・1 px 未満の点は省く（スマホ相当の速さで全国表示でも 1 回 約 8 ms）。ラインカラーのない路線は灰色。色・太さ・濃さは localStorage の `mapLook` に保存。**復元中は保存しない（`lookRestoring`）**：`setBase()` が Leaflet の `baselayerchange` を起こし、その中の `lookSave()` が復元前の既定値で保存を上書きして、再読み込みのたびに鉄道の線・背景の薄さが交互に消えていた。
 - 地図の見た目（背景の地図はパネルの「地図の見た目」と右上のレイヤー切り替えが連動）：背景の地図（`BASES`）、背景の薄さ・鮮やかさ（背景のタイルだけに `filter: opacity() saturate()` をかける。CSS の `opacity` は Leaflet が要素に直接書くので効かない。鉄道のレイヤーにはかけない）。localStorage の `mapLook` に保存する。
+- **オフライン対応**（`src/sw.js` → `dist/sw.js`、https か localhost のときだけ登録）：ページ本体と `lines.json` は通信優先・不通なら保存分、Leaflet（cdnjs）とフォントは保存分優先。地理院タイル（`cyberjapandata.gsi.go.jp/xyz/`）は見たものだけ CORS で取得して保存（キャッシュ `gsi-tiles-v1`、最大 3,000 枚・30 日で取り直し、古いものから削除。CORS が通らなければ保存せず通常どおり表示）。**OpenStreetMap と OpenRailwayMap のタイルは保存しない**（OSMF のタイル利用方針は先読み・オフライン用の保存を禁止。違反はブロックされる）。範囲を指定した一括保存・先読みは作らない。パネルの「オフライン」に保存枚数と「保存した地図を消す」。
+- タイルの読み込み：全タイルで `updateWhenIdle: false`（動かしている最中から読む。スマホの既定は止まってから）、`keepBuffer: 4`（`TILE_OPTS`）。
 - URL のハッシュ `#id=<駅id>&k=<k>&m=<metric>` で状態を再現できる。地図の位置とズームは `moveend` ごとに localStorage の `view` に保存し、再読み込み時に戻す（保存がなければ選んだ駅を表示）。
 - 最寄り駅の境界と全駅の境界は、ズームが `bndZoom`（既定 10、localStorage に保存）未満のときは描かない（縮小時の重さ対策。駅の点と駅名はこの設定に関係なく出す）。
 - **未取得駅**（パネルの「未取得駅」）：`駅名` の列がある CSV を読み込み、駅名で駅データと照合する（駅データの駅名は全駅で一意。区別の括弧付きの名前も駅メモと同じ表記）。`メモ本文` の列があれば ❌ を含む行だけを未取得とする（ユーザーのテストデータが別のツールのこの形式だったため。その形式に合わせる必要はない）。
@@ -149,6 +152,7 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 - この環境からは cdnjs・地図タイル（OSM・地理院・OpenRailwayMap）・wiki.openstreetmap.org に接続できない。Google Fonts と raw.githubusercontent.com は使える。
 - Leaflet は `npm pack leaflet@1.9.4` を作業用フォルダ（scratchpad）に展開し、Playwright（`/opt/node-tools/node_modules/playwright`、Chromium は導入済み。`playwright install` はしない）の `page.route` で `leaflet.min.js` / `.css` を差し替える。タイルは要求先を記録して代わりの画像を返す。`lines.json` も route で返す。
 - 内部の変数を見るときは、作業用にコピーした HTML の `// ---------------- boot` の前に `window.__app = { map, st, ... }` を差し込む（`dist/` は書き換えない）。
+- Service Worker の確認：`node scripts/serve.js 8765` で `dist/` を localhost で配信し、`PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS=1` を付けて Playwright を動かすと、Service Worker が出す外部への要求も `context.route` で差し替えられる。`context.setOffline(true)` でオフラインを再現。ただし差し替えた応答は CORS の検査を通ってしまうので、CORS が拒否される場合の動きはこの方法では確かめられない。サーバーを止めるときは `pkill -f` を使わない（自分のコマンドにも一致して止まる）。`ps -eo pid,args | grep "[s]erve.js 8765"` で番号を調べて止める。
 - 測定の注意：`page.evaluate` で Leaflet のメソッドの戻り値（map オブジェクト）を返すと、そのシリアライズに数秒かかって測定が狂う。`() => { map.setZoom(...); }` のように何も返さない。
 - スマホ表示ではパネルが最初は畳まれている。操作するときは開くか、`dispatchEvent` で値を変える。
 - ユーザーの実データ（未取得駅の CSV など）はリポジトリに入れない。テストには架空のデータを使う。
