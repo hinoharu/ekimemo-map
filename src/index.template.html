@@ -351,14 +351,14 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     st.styledSel = st.sel;
   }
   // ring around the selected station (non-interactive, so taps still reach the dot below it)
-  const SEL_RING = 10.5; // ring centre line: colored 9–12 px, white 8–13 px; the gap to the dot (r 7) ≈ the ring width
+  const SEL_RING = 9.5; // ring centre line: colored 8.5–10.5 px, white 7.5–11.5 px; ~1 px gap to the dot (r 7)
   let selRing = null;
   function placeSelRing() {
     if (selRing) { stationLayer.removeLayer(selRing[0]); stationLayer.removeLayer(selRing[1]); selRing = null; }
     if (st.sel < 0 || !st.rows[st.sel]) return;
     const r = st.rows[st.sel], ll = [r[4], r[5]], col = stationStyle(st.sel).fillColor;
-    selRing = [L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: "#fff", weight: 5, fill: false, interactive: false }),
-               L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: col, weight: 3, fill: false, interactive: false })];
+    selRing = [L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: "#fff", weight: 4, fill: false, interactive: false }),
+               L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: col, weight: 2, fill: false, interactive: false })];
     selRing.forEach(c => c.addTo(stationLayer));
   }
   function restyleStation(i) { if (i >= 0 && markers[i]) { markers[i].setStyle(stationStyle(i)); markers[i].setTooltipContent(stationTip(i)); } }
@@ -443,7 +443,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     for (const i of ids) {
       const r = st.rows[i], on = i === st.sel, ua = isUa(i), cls = "lbl" + (on ? " on" : "") + (r[6] ? " closed" : "") + (ua ? " ua" : "");
       L.marker([r[4], r[5]], {
-        icon: L.divIcon({ className: "lbl-wrap", html: `<span class="${cls}">${esc(r[2])}</span>`, iconSize: null, iconAnchor: on ? [-15, 9] : ua ? [-7, 8] : [-6, 8] }),
+        icon: L.divIcon({ className: "lbl-wrap", html: `<span class="${cls}">${esc(r[2])}</span>`, iconSize: null, iconAnchor: on ? [-13, 9] : ua ? [-7, 8] : [-6, 8] }),
         interactive: false, keyboard: false,
       }).addTo(labelLayer);
     }
