@@ -1144,9 +1144,9 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const i = hitStation(e.layerPoint);
     // long press (touch) / right click on a station: toggle acquired <-> unacquired; elsewhere: test position
     if (i >= 0) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
-    // a designated position: stop using the location (its next fix would overwrite this) and stop keeping it centered
+    // a designated position: stop using the location (its next fix would overwrite this). "Follow" is kept as it is:
+    // it does nothing while the location is off, and turning the location back on is then one tap
     if (geoOn()) stopGeo();
-    if ($("geoFollow").checked) setFollow(false);
     track.lastUser = Date.now(); setPosition(e.latlng.lat, e.latlng.lng, 0, true);
   });
 
