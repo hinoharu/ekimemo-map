@@ -93,6 +93,9 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 .log time { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .sub { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 8px; }
+/* base map: faded toward the paper colour and/or desaturated (the railway overlay is not affected) */
+.leaflet-container { background: var(--paper); }
+.base-tiles { filter: opacity(var(--base-op, 1)) saturate(var(--base-sat, 1)); } /* not "opacity": Leaflet sets it inline */
 details.sub > summary { cursor: pointer; font-size: 12px; letter-spacing: 0.1em; color: var(--muted); }
 details.sub[open] > summary { margin-bottom: 4px; }
 .sty { display: grid; gap: 3px; font-size: 12.5px; }
@@ -216,6 +219,27 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <ol class="log" id="log" aria-live="polite"></ol>
   </div>
 
+  <div class="sub">
+    <div class="label">地図の見た目</div>
+    <div class="field">
+      <label class="label" for="baseMap">背景の地図</label>
+      <select id="baseMap">
+        <option value="osm" selected>OpenStreetMap</option>
+        <option value="gsiPale">地理院 淡色地図</option>
+        <option value="gsiStd">地理院 標準地図</option>
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" id="railOn"> 鉄道を強調する（OpenRailwayMap を重ねる）</label>
+    <div class="field">
+      <div class="label"><label for="baseFade">背景の薄さ</label><output id="baseFadeOut">0%</output></div>
+      <input type="range" id="baseFade" min="0" max="80" step="5" value="0">
+    </div>
+    <div class="field">
+      <div class="label"><label for="baseSat">背景の色の鮮やかさ</label><output id="baseSatOut">100%</output></div>
+      <input type="range" id="baseSat" min="0" max="100" step="10" value="100">
+    </div>
+  </div>
+
   <details class="sub" id="styleSec">
     <summary>線の見た目（色・太さ・濃さ・線の種類）</summary>
     <div id="styleBox" style="display:grid;gap:10px"></div>
@@ -275,14 +299,20 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ---------------- map
   const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([35.68, 139.76], 11);
   L.control.zoom({ position: "topright" }).addTo(map);
-  const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
+  const BASES = {
+    osm: ["OpenStreetMap", L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, className: "base-tiles", attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' })],
+    gsiPale: ["地理院 淡色", L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", { maxZoom: 18, className: "base-tiles", attribution: GSI_ATTR })],
+    gsiStd: ["地理院 標準", L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", { maxZoom: 18, className: "base-tiles", attribution: GSI_ATTR })],
+  };
+  // railways emphasised: a transparent overlay (free for public, non-commercial, small-scale sites; CC BY-SA 2.0)
+  const rail = L.tileLayer("https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png", {
+    maxZoom: 19, zIndex: 5,
+    attribution: 'Data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Style: <a href="https://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA 2.0</a> <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>',
   });
-  const gsi = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
-    maxZoom: 18, attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>',
-  });
-  osm.addTo(map);
-  L.control.layers({ "OpenStreetMap": osm, "地理院 淡色": gsi }, null, { position: "topright" }).addTo(map);
+  BASES.osm[1].addTo(map);
+  const layersCtl = L.control.layers(Object.fromEntries(Object.values(BASES)), { "鉄道を強調（OpenRailwayMap）": rail }, { position: "topright" }).addTo(map);
   map.attributionControl.addAttribution('駅データ: <a href="https://github.com/Seo-4d696b75/station_database">station_database</a> (CC BY 4.0)');
 
   // Station dots: drawn by us on the canvas of a layer-less L.Canvas renderer (Leaflet sizes, positions and
@@ -933,6 +963,32 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("kn").addEventListener("change", () => setK($("kn").value));
   $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); drawVor(); });
   $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); drawVor(); });
+  // ---------------- map look: base map, railway overlay, fading (kept in localStorage "mapLook")
+  const lookSave = () => { try { localStorage.setItem("mapLook", JSON.stringify({ base: $("baseMap").value, rail: $("railOn").checked, fade: +$("baseFade").value, sat: +$("baseSat").value })); } catch (e) {} };
+  function setBase(key) {
+    if (!BASES[key]) return;
+    for (const [k, [, layer]] of Object.entries(BASES)) if (k !== key && map.hasLayer(layer)) map.removeLayer(layer);
+    if (!map.hasLayer(BASES[key][1])) BASES[key][1].addTo(map);
+    $("baseMap").value = key;
+  }
+  function setRail(on) { $("railOn").checked = on; if (on) rail.addTo(map); else map.removeLayer(rail); }
+  function applyFade() {
+    const f = +$("baseFade").value, s = +$("baseSat").value, c = map.getContainer();
+    c.style.setProperty("--base-op", String(1 - f / 100)); c.style.setProperty("--base-sat", String(s / 100));
+    $("baseFadeOut").textContent = f + "%"; $("baseSatOut").textContent = s + "%";
+  }
+  $("baseMap").addEventListener("change", () => { setBase($("baseMap").value); lookSave(); });
+  $("railOn").addEventListener("change", () => { setRail($("railOn").checked); lookSave(); });
+  for (const id of ["baseFade", "baseSat"]) $(id).addEventListener("input", () => { applyFade(); lookSave(); });
+  // the layers control (top right) changes the same things
+  map.on("baselayerchange", (e) => { const k = Object.keys(BASES).find(k => BASES[k][1] === e.layer); if (k) { $("baseMap").value = k; lookSave(); } });
+  map.on("overlayadd overlayremove", (e) => { if (e.layer === rail) { $("railOn").checked = e.type === "overlayadd"; lookSave(); } });
+  try {
+    const m = JSON.parse(localStorage.getItem("mapLook") || "null");
+    if (m) { setBase(m.base); setRail(!!m.rail); if (Number.isFinite(m.fade)) $("baseFade").value = m.fade; if (Number.isFinite(m.sat)) $("baseSat").value = m.sat; }
+  } catch (e) {}
+  applyFade();
+
   $("bndZoom").addEventListener("change", () => {
     try { localStorage.setItem("bndZoom", $("bndZoom").value); } catch (e) {}
     drawVor(); drawView();
