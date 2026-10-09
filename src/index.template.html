@@ -39,6 +39,16 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   .panel { left: 8px; right: 8px; width: auto; top: auto; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-height: 48%; }
 }
 .panel.collapsed > :not(.head) { display: none; }
+#fold .fold-ico { display: none; }
+/* phones: folded, the panel shrinks to a round menu button at the bottom right (above the attribution) */
+@media (max-width: 640px) {
+  .panel.collapsed { left: auto; right: 10px; bottom: calc(34px + env(safe-area-inset-bottom, 0px)); width: auto; padding: 0; gap: 0; overflow: visible; border-radius: 50%; }
+  .panel.collapsed .head { position: static; margin: 0; padding: 0; background: none; }
+  .panel.collapsed h1 { display: none; }
+  .panel.collapsed #fold { width: 48px; height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--ink); }
+  .panel.collapsed #fold .fold-ico { display: block; }
+  .panel.collapsed #fold .fold-txt { display: none; }
+}
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   /* stays visible while the panel scrolls (top = -panel padding) */
   position: sticky; top: -14px; z-index: 6; background: var(--paper); margin: -14px -16px 0; padding: 14px 16px 6px; }
@@ -125,7 +135,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 <section class="panel" id="panel">
   <div class="head">
     <h1>駅レーダー圏マップ</h1>
-    <button id="fold" aria-expanded="true">たたむ</button>
+    <button id="fold" aria-expanded="true" aria-label="メニューをたたむ"><svg class="fold-ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span class="fold-txt">たたむ</span></button>
   </div>
 
   <div class="field search">
@@ -1134,7 +1144,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("showClosed").addEventListener("change", () => applyFilter(true));
   function setFolded(c) {
     $("panel").classList.toggle("collapsed", c);
-    $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+    $("fold").querySelector(".fold-txt").textContent = c ? "ひらく" : "たたむ";
+    $("fold").setAttribute("aria-expanded", String(!c)); $("fold").setAttribute("aria-label", c ? "メニューをひらく" : "メニューをたたむ");
     if (!c && st.ua.size) renderUaList(); // the list is not kept up to date while folded
   }
   $("fold").addEventListener("click", () => {
