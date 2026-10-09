@@ -20,15 +20,17 @@
 | `src/station_core.js` | アルゴリズム本体。UI に依存しない純粋な関数。Node からも `require` できる |
 | `src/index.template.html` | 画面・操作・Leaflet 連携。`/*CORE*/` `/*DATA*/` `/*VERSION*/` をビルドで置換 |
 | `src/sw.js` | Service Worker（オフライン対応）。ビルドで `/*BUILD*/` をビルドのハッシュに置き換えて `dist/sw.js` に出力 |
-| `scripts/build.py` | 上の2つと `data/station.csv` を組み立てて `dist/index.html` を作る。`data/lines.json` を `dist/` にコピーし、`src/sw.js` から `dist/sw.js` を作る。`--fetch` で駅データと路線データを取得 |
+| `src/manifest.webmanifest` | Web アプリマニフェスト（Android の Chrome で「インストール」できるように。名前「駅レーダー圏マップ」、短い名前「駅レーダー」） |
+| `src/icons/` | アプリのアイコン。`design-a.svg`〜`design-d.svg` は 4 案の原画（512 px 四方、大事な部分は中央 80% に収める）で、**A を採用**。原画は `scripts/icon_designs.js` が書き出す（デザインを変えるときはこのスクリプトを直して実行。見比べ用の `build/icon-designs.html` も作る）。PNG（`icon-192.png` `icon-512.png`＝角丸、`icon-maskable-512.png` `apple-touch-icon.png`＝全面）は `npm run icons`（`scripts/make_icons.js [a〜d]`、Playwright の Chromium で書き出す）で作ってコミットする。ビルドはコピーするだけ |
+| `scripts/build.py` | 上の2つと `data/station.csv` を組み立てて `dist/index.html` を作る。`data/lines.json` を `dist/` にコピーし、`src/sw.js` から `dist/sw.js` を作る。マニフェストとアイコンの PNG も `dist/` にコピーする。`--fetch` で駅データと路線データを取得 |
 | `data/station.csv`, `data/VERSION` | 駅データのスナップショット（オフラインでも再現できるようにコミットしている） |
 | `data/lines.json` | 路線の線形（station_database の `out/main/polyline/*.json` を約 10 m の誤差で簡略化）とラインカラー。`build.py --fetch` で更新し、`dist/lines.json` として公開する（ページは鉄道の線を表示するときだけ読み込む） |
 | `tests/verify.js` | 総当たりの順位計算と照合する正しさのテスト＋速度表示 |
-| `tests/check_html.js` | ビルド結果のプレースホルダ残りと、インラインスクリプトの構文チェック。`dist/lines.json` と `dist/sw.js` も確認 |
+| `tests/check_html.js` | ビルド結果のプレースホルダ残りと、インラインスクリプトの構文チェック。`dist/lines.json` と `dist/sw.js`、マニフェスト（ページからのリンク、アイコンの有無と実際の大きさ）も確認 |
 | `.github/workflows/pages.yml` | push 時にビルド→テスト→公開。週1回は最新データを取得して公開 |
 | `HANDOFF.md` | 作業の引き継ぎメモ（現在の状況・これまでの PR・計測値・残課題）。こまめに更新する |
 
-`dist/`（`index.html`・`lines.json`・`sw.js`）と `build/` は生成物です。手で編集せず、コミットもしません。
+`dist/`（`index.html`・`lines.json`・`sw.js`・`manifest.webmanifest`・`icons/`）と `build/` は生成物です。手で編集せず、コミットもしません。
 
 ## コマンド
 
@@ -119,6 +121,7 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 - **鉄道の線**（`railMode`：表示しない／ラインカラー／1 色／OpenRailwayMap）：自前の線は `RailCanvas`（`DotCanvas` と同じ仕組み、pane `rail` z-index 395＝背景と塗りの上、境界線の下）の `_draw` で描く（`drawRail`）。`lines.json` は初めて表示するときに 1 回だけ読み込み、座標を正規化した Web Mercator（0〜1）に変換しておく。描画は、描く範囲にかかる区間だけ・色ごとに 1 本の path・1 px 未満の点は省く（スマホ相当の速さで全国表示でも 1 回 約 8 ms）。ラインカラーのない路線は灰色。色・太さ・濃さは localStorage の `mapLook` に保存。**復元中は保存しない（`lookRestoring`）**：`setBase()` が Leaflet の `baselayerchange` を起こし、その中の `lookSave()` が復元前の既定値で保存を上書きして、再読み込みのたびに鉄道の線・背景の薄さが交互に消えていた。
 - 地図の見た目（背景の地図はパネルの「地図の見た目」と右上のレイヤー切り替えが連動）：背景の地図（`BASES`）、背景の薄さ・鮮やかさ（背景のタイルだけに `filter: opacity() saturate()` をかける。CSS の `opacity` は Leaflet が要素に直接書くので効かない。鉄道のレイヤーにはかけない）。localStorage の `mapLook` に保存する。
 - **オフライン対応**（`src/sw.js` → `dist/sw.js`、https か localhost のときだけ登録）：ページ本体と `lines.json` は通信優先・不通なら保存分、Leaflet（cdnjs）とフォントは保存分優先。地理院タイル（`cyberjapandata.gsi.go.jp/xyz/`）は見たものだけ CORS で取得して保存（キャッシュ `gsi-tiles-v1`、最大 3,000 枚・30 日で取り直し、古いものから削除。CORS が通らなければ保存せず通常どおり表示）。**OpenStreetMap と OpenRailwayMap のタイルは保存しない**（OSMF のタイル利用方針は先読み・オフライン用の保存を禁止。違反はブロックされる）。範囲を指定した一括保存・先読みは作らない。パネルの「オフライン」に保存枚数と「保存した地図を消す」。
+- **インストール（PWA）**：Android の Chrome の「インストール」には、https・fetch を扱う Service Worker・マニフェスト（名前、`start_url`、`display`、192 px と 512 px のアイコン）が必要。マニフェストがなかったため「インストールできません」だった。`start_url`・`scope` は `./`（公開先が `/ekimemo-map/` の下のため相対）、`display: standalone`、`theme_color` は `#1f5fa8`。マニフェストとアイコンは Service Worker でも保存する（通信優先）。ヘッドレス Chromium の `Page.getInstallabilityErrors` で問題 0 件を確認済み（実機は未確認）。
 - タイルの読み込み：全タイルで `updateWhenIdle: false`（動かしている最中から読む。スマホの既定は止まってから）、`keepBuffer: 4`（`TILE_OPTS`）。
 - URL のハッシュ `#id=<駅id>&k=<k>&m=<metric>` で状態を再現できる。地図の位置とズームは `moveend` ごとに localStorage の `view` に保存し、再読み込み時に戻す（保存がなければ選んだ駅を表示）。
 - 最寄り駅の境界と全駅の境界は、ズームが `bndZoom`（既定 10、localStorage に保存）未満のときは描かない（縮小時の重さ対策。駅の点と駅名はこの設定に関係なく出す）。

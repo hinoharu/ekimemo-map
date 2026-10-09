@@ -21,5 +21,21 @@ try {
   if (sw.includes("/*BUILD*/")) throw new Error("placeholder /*BUILD*/ left");
   new vm.Script(sw, { filename: "sw.js" });
 } catch (e) { console.error(`dist/sw.js: ${e.message}`); errors++; }
+// installable web app: the manifest parses, is linked from the page and its icons exist with the stated sizes
+try {
+  const dist = path.join(__dirname, "..", "dist");
+  const m = JSON.parse(fs.readFileSync(path.join(dist, "manifest.webmanifest"), "utf8"));
+  if (!html.includes('rel="manifest" href="manifest.webmanifest"')) throw new Error("not linked from index.html");
+  for (const k of ["name", "short_name", "start_url", "display"]) if (!m[k]) throw new Error(`no ${k}`);
+  const sizes = new Set();
+  for (const ic of m.icons || []) {
+    const png = fs.readFileSync(path.join(dist, ic.src)); // PNG: width / height at bytes 16..23
+    const wh = `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`;
+    if (wh !== ic.sizes) throw new Error(`${ic.src} is ${wh}, manifest says ${ic.sizes}`);
+    sizes.add(ic.sizes + "/" + (ic.purpose || "any"));
+  }
+  for (const need of ["192x192/any", "512x512/any", "512x512/maskable"]) if (!sizes.has(need)) throw new Error(`no ${need} icon`);
+  fs.readFileSync(path.join(dist, "icons", "apple-touch-icon.png"));
+} catch (e) { console.error(`dist/manifest.webmanifest: ${e.message}`); errors++; }
 if (errors) process.exit(1);
-console.log(`dist/index.html ok (${scripts.length} inline scripts, ${(html.length / 1024).toFixed(0)} KiB), dist/lines.json ok, dist/sw.js ok`);
+console.log(`dist/index.html ok (${scripts.length} inline scripts, ${(html.length / 1024).toFixed(0)} KiB), dist/lines.json ok, dist/sw.js ok, manifest and icons ok`);

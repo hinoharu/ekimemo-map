@@ -1,7 +1,7 @@
 // Service worker: lets the page open without a network (e.g. on a plane, where GPS still works) and keeps
 // the GSI base-map tiles the user has looked at. Built into dist/sw.js by scripts/build.py (the BUILD placeholder is
 // replaced with a hash of the build, so a new build replaces the old page cache).
-//   page itself, lines.json : network first, the cached copy when offline
+//   page itself, lines.json, manifest, icons : network first, the cached copy when offline
 //   Leaflet (cdnjs), fonts  : cache first (versioned URLs)
 //   GSI tiles (地理院タイル) : cache first, only tiles that were viewed; at most GSI_MAX, renewed after GSI_DAYS
 //   OpenStreetMap / OpenRailwayMap tiles: not touched (their policies ask not to keep tiles for offline use;
@@ -11,7 +11,7 @@ const SHELL = "shell-" + BUILD, LIB = "lib-v1", GSI = "gsi-tiles-v1";
 const GSI_MAX = 3000, GSI_DAYS = 30;
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(["./", "lines.json"])).catch(() => {}).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(["./", "lines.json", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png"])).catch(() => {}).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith("shell-") && k !== SHELL).map((k) => caches.delete(k))))
@@ -25,6 +25,7 @@ self.addEventListener("fetch", (e) => {
   if (url.origin === self.location.origin) {
     if (req.mode === "navigate") return e.respondWith(networkFirst(req, "./"));
     if (url.pathname.endsWith("/lines.json")) return e.respondWith(networkFirst(req, "lines.json"));
+    if (url.pathname.endsWith(".webmanifest") || url.pathname.includes("/icons/")) return e.respondWith(networkFirst(req, req.url));
     return;
   }
   if (url.hostname === "cdnjs.cloudflare.com" || url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com")

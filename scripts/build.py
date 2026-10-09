@@ -7,7 +7,8 @@ Usage:
                                       # (falls back to the files in data/ if a download fails)
 
 Outputs: dist/index.html (stations embedded), dist/lines.json (railway lines, loaded by the page
-only when the railways are drawn) and dist/sw.js (service worker for offline use), plus
+only when the railways are drawn), dist/sw.js (service worker for offline use), dist/manifest.webmanifest
+and dist/icons/*.png (installable web app), plus
 build/stations.json for the tests.
 
 Only the Python standard library is used.
@@ -161,10 +162,17 @@ def main():
         shutil.copyfile(DATA / "lines.json", DIST / "lines.json")
     else:
         print("WARNING: data/lines.json not found; railways cannot be drawn (run with --fetch)", file=sys.stderr)
+    # installable web app: manifest and the icon PNGs (rendered from src/icons/design-*.svg by scripts/make_icons.js)
+    shutil.copyfile(SRC / "manifest.webmanifest", DIST / "manifest.webmanifest")
+    (DIST / "icons").mkdir(exist_ok=True)
+    icons = sorted((SRC / "icons").glob("*.png"))
+    for p in icons:
+        shutil.copyfile(p, DIST / "icons" / p.name)
     # service worker: the build hash renames its page cache, so a new build replaces the old copy
     h = hashlib.sha256(html.encode("utf-8"))
-    if (DIST / "lines.json").exists():
-        h.update((DIST / "lines.json").read_bytes())
+    for p in [DIST / "lines.json", DIST / "manifest.webmanifest"] + [DIST / "icons" / q.name for q in icons]:
+        if p.exists():
+            h.update(p.read_bytes())
     sw = (SRC / "sw.js").read_text(encoding="utf-8")
     if sw.count("/*BUILD*/") != 1:
         sys.exit("src/sw.js must contain exactly one /*BUILD*/")
