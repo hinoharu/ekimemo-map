@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: full-bleed map with one floating instrument panel (top-left; bottom sheet on phones). */
 :root {
@@ -17,7 +17,11 @@
   --rule: #dcdfe6;
   --region: #1f5fa8;
   --station: #c2410c;
-  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+  /* BIZ UDPGothic: web font from Google Fonts (also installed on Windows 10 1809+). If it cannot load:
+     macOS/iOS → Hiragino; Windows 7+ → Meiryo (both names; before Yu Gothic, which renders thin on Windows);
+     Android → Noto Sans CJK JP (system font; Droid Sans Japanese on old versions);
+     last resort on old Windows → MS PGothic. */
+  --font-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo", "メイリオ", "Noto Sans JP", "Noto Sans CJK JP", "Droid Sans Japanese", "Yu Gothic", "MS PGothic", "ＭＳ Ｐゴシック", sans-serif;
   --font-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   color-scheme: light;
 }
@@ -71,10 +75,10 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 .rank .verdict { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); }
 .leaflet-container { font-family: var(--font-body); }
 .lbl-wrap { background: none; border: none; }
-.lbl { display: inline-block; font-size: 11px; font-weight: 500; color: var(--ink); white-space: nowrap; pointer-events: none;
-  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 1px #fff; }
+.lbl { display: inline-block; font-size: 12px; font-weight: 700; color: var(--ink); white-space: nowrap; pointer-events: none;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 2px #fff, 0 0 1px #fff; }
 .lbl.closed { color: var(--muted); }
-.lbl.on { color: var(--station); font-weight: 700; font-size: 13px; }
+.lbl.on { color: var(--station); font-size: 14px; }
 .geo { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 6px; }
 .geo .label { margin-bottom: 2px; }
 .status { font-size: 12.5px; line-height: 1.5; }
@@ -83,6 +87,12 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 .log li { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
 .log time { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; }
+/* location buttons on the map (Leaflet control, under the zoom buttons) */
+.geo-ctl a { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; line-height: 0; color: var(--ink); cursor: pointer; }
+.geo-ctl a svg { width: 20px; height: 20px; }
+.geo-ctl a.on { background: var(--region); color: #fff; }
+.geo-ctl a.on:hover { background: #174b86; }
+.geo-ctl a.disabled { color: #b5bac6; cursor: default; }
 </style>
 </head>
 <body>
@@ -129,6 +139,7 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 
   <div class="field">
     <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
+    <label class="check"><input type="checkbox" id="vor1"> 最寄り駅の境界を常に描く（1 次ボロノイ図・位置登録される駅の範囲）</label>
     <label class="check"><input type="checkbox" id="viewAll"> 表示中の全駅の境界を描く（k 次ボロノイ図）</label>
     <label class="check"><input type="checkbox" id="showClosed" checked> 廃駅も含める</label>
     <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき）</label>
@@ -138,12 +149,11 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 
   <div class="geo">
     <div class="label">現在地と通知</div>
-    <label class="check"><input type="checkbox" id="geoOn"> 現在地を使う</label>
-    <label class="check"><input type="checkbox" id="follow" checked> 地図を現在地に追従する（手で動かした後は 15 秒待つ）</label>
     <label class="check"><input type="checkbox" id="nNear" checked> 最寄り駅が変わったら通知</label>
     <label class="check"><input type="checkbox" id="nSet"> レーダー k 駅の顔ぶれが変わったら通知</label>
     <label class="check"><input type="checkbox" id="nSel" checked> 選んだ駅の圏内に出入りしたら通知</label>
     <div class="row"><button class="btn" id="notifPerm">端末の通知を許可する</button></div>
+    <div class="note">地図右上のボタンで、現在地を使う（地図が現在地に追従する）かどうかの切り替えと、現在地への移動ができます。手で地図を動かすと 15 秒間は追従を止めます。</div>
     <div class="status" id="geoStatus">現在地は使っていません。</div>
     <ol class="log" id="log" aria-live="polite"></ol>
     <div class="note">テスト用：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします。</div>
@@ -173,7 +183,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const st = {
     all: [], rows: [], idx: null, version: EMBED.version,
     sel: -1, k: 18, metric: "flat", clip: 3,
-    cache: new Map(), viewJob: 0, levelJob: 0,
+    cache: new Map(), viewJob: 0, levelJob: 0, vorJob: 0,
   };
 
   // ---------------- map
@@ -195,7 +205,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   map.createPane("stations").style.zIndex = 450;
   const canvasR = L.canvas({ pane: "stations", padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
   const lineR = L.canvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
+  // current-position dot: above the station dots and name labels (markerPane 600; tooltips 650 and
+  // popups 700 stay on top), click-through so it never hides the stations from taps
+  const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
+  const meR = L.canvas({ pane: "me", padding: 0.3 });
   const stationLayer = L.layerGroup().addTo(map);
+  const vorLayer = L.layerGroup().addTo(map);
   const viewLayer = L.layerGroup().addTo(map);
   const levelLayer = L.layerGroup().addTo(map);
   const regionLayer = L.layerGroup().addTo(map);
@@ -215,6 +230,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     st.idx = makeIndex(lat, lng);
     st.cache.clear();
     drawStations();
+    drawVor();
     $("datainfo").textContent = `駅データ main 版 ${fmtVer(st.version)}・${st.rows.length.toLocaleString()} 駅`;
     let sel = -1;
     if (keepSel && prevId != null) sel = st.rows.findIndex(r => r[0] === prevId);
@@ -320,12 +336,13 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function setPosition(lat, lng, acc, simulated) {
     track.pos = { lat, lng, acc, simulated };
     if (!track.me) {
-      track.acc = L.circle([lat, lng], { radius: acc || 0, color: "#2563eb", weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false }).addTo(meLayer);
-      track.me = L.circleMarker([lat, lng], { radius: 7, color: "#fff", weight: 2.5, fillColor: "#2563eb", fillOpacity: 1, interactive: false }).addTo(meLayer);
+      track.acc = L.circle([lat, lng], { renderer: lineR, radius: acc || 0, color: "#2563eb", weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false }).addTo(meLayer);
+      track.me = L.circleMarker([lat, lng], { renderer: meR, radius: 7, color: "#fff", weight: 2.5, fillColor: "#2563eb", fillOpacity: 1, interactive: false }).addTo(meLayer);
     }
     track.me.setLatLng([lat, lng]); track.acc.setLatLng([lat, lng]).setRadius(acc || 0);
-    if ($("follow").checked && Date.now() - track.lastUser > 15000) map.panTo([lat, lng], { animate: true });
+    if (following() && Date.now() - track.lastUser > 15000) map.panTo([lat, lng], { animate: true });
     evaluate(true);
+    geoCtl.update();
   }
 
   // compare the radar at the current position with the previous one and notify on changes
@@ -364,8 +381,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     } catch (e) { /* some mobile browsers only allow notifications from a service worker */ }
   }
 
+  // using the location = following it (paused for 15 s after the user drags the map)
+  const following = () => track.watch !== null;
   function startGeo() {
-    if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; $("geoOn").checked = false; return; }
+    if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; return; }
+    track.lastUser = 0;
     if (!window.isSecureContext) $("geoStatus").textContent = "https か localhost で開いていないため、現在地を取得できない可能性があります。";
     else $("geoStatus").textContent = "現在地を取得しています…";
     track.watch = navigator.geolocation.watchPosition(
@@ -376,16 +396,45 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
         $("geoStatus").textContent = why + (window.isSecureContext ? "" : "（https か localhost で開く必要があります）");
       },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+    geoCtl.update();
   }
   function stopGeo() {
     if (track.watch !== null) navigator.geolocation.clearWatch(track.watch);
     track.watch = null;
     $("geoStatus").textContent = track.pos ? "現在地の更新を止めました。" : "現在地は使っていません。";
+    geoCtl.update();
   }
-  $("geoOn").addEventListener("change", () => $("geoOn").checked ? startGeo() : stopGeo());
-  $("follow").addEventListener("change", () => { if ($("follow").checked && track.pos) { track.lastUser = 0; map.panTo([track.pos.lat, track.pos.lng]); } });
+  function jumpToMe() {
+    if (track.pos) { track.lastUser = 0; map.panTo([track.pos.lat, track.pos.lng]); }
+    else if (!following()) startGeo(); // nothing to jump to yet: start using the location
+  }
+  // map buttons: [use location / follow] [jump to current position]
+  const ICON_GEO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>';
+  const ICON_JUMP = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3 3 10.5l7.5 2.9L13.4 21z"/></svg>';
+  const geoCtl = L.control({ position: "topright" });
+  geoCtl.onAdd = () => {
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl");
+    const mk = (html, fn) => {
+      const a = L.DomUtil.create("a", "", box); a.href = "#"; a.setAttribute("role", "button"); a.innerHTML = html;
+      L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); fn(); });
+      return a;
+    };
+    geoCtl.geo = mk(ICON_GEO, () => following() ? stopGeo() : startGeo());
+    geoCtl.jump = mk(ICON_JUMP, jumpToMe);
+    L.DomEvent.disableClickPropagation(box);
+    return box;
+  };
+  geoCtl.update = () => {
+    const on = following();
+    geoCtl.geo.classList.toggle("on", on);
+    geoCtl.geo.title = on ? "現在地を使っています（押すと止める）" : "現在地を使う（地図が追従します）";
+    geoCtl.geo.setAttribute("aria-label", geoCtl.geo.title); geoCtl.geo.setAttribute("aria-pressed", String(on));
+    geoCtl.jump.title = track.pos ? "現在地へ移動" : "現在地へ移動（現在地の取得を始めます）";
+    geoCtl.jump.setAttribute("aria-label", geoCtl.jump.title);
+  };
+  geoCtl.addTo(map); geoCtl.update();
   setInterval(() => { // periodic re-centering
-    if ($("follow").checked && track.pos && Date.now() - track.lastUser > 15000) {
+    if (following() && track.pos && Date.now() - track.lastUser > 15000) {
       const c = map.getCenter();
       if (Math.abs(c.lat - track.pos.lat) + Math.abs(c.lng - track.pos.lng) > 1e-5) map.panTo([track.pos.lat, track.pos.lng]);
     }
@@ -436,6 +485,28 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     if (ids.length > CAP) toast(`表示範囲の駅が多いため、中心に近い ${CAP} 駅だけ描いています。拡大すると全部描けます。`);
   }
   map.on("moveend", () => { if ($("viewAll").checked) drawView(); });
+
+  // order-1 diagram (nearest-station boundaries) for stations in view, independent of k.
+  // ~0.5 ms per station and cached, so panning around is cheap after the first pass.
+  function drawVor() {
+    const job = ++st.vorJob; vorLayer.clearLayers();
+    if (!$("vor1").checked) return;
+    const b = map.getBounds().pad(0.2), c = map.getCenter();
+    const ids = [];
+    st.rows.forEach((r, i) => { if (b.contains([r[4], r[5]])) ids.push(i); });
+    ids.sort((a, z) => (st.rows[a][4] - c.lat) ** 2 + (st.rows[a][5] - c.lng) ** 2 - (st.rows[z][4] - c.lat) ** 2 - (st.rows[z][5] - c.lng) ** 2);
+    const todo = ids.slice(0, 3000); // zoomed far out: only around the center
+    let q = 0;
+    const step = () => {
+      if (job !== st.vorJob) return;
+      const t = performance.now(), batch = [];
+      while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], 1).latlng); q++; }
+      if (batch.length) L.polygon(batch, { renderer: lineR, color: "#7a3b8f", weight: 1, opacity: 0.6, fill: false, interactive: false }).addTo(vorLayer);
+      if (q < todo.length) setTimeout(step, 0);
+    };
+    step();
+  }
+  map.on("moveend", () => { if ($("vor1").checked) drawVor(); });
 
   // ---------------- ranking at a clicked point
   map.on("click", (e) => {
@@ -494,8 +565,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   }
   $("kr").addEventListener("input", () => { $("kout").textContent = $("kr").value; $("kn").value = $("kr").value; st.k = +$("kr").value; redraw(false); });
   $("kn").addEventListener("change", () => setK($("kn").value));
-  $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); });
-  $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); });
+  $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); drawVor(); });
+  $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); drawVor(); });
+  $("vor1").addEventListener("change", () => {
+    try { localStorage.setItem("vor1", $("vor1").checked ? "1" : "0"); } catch (e) {}
+    drawVor();
+  });
   $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
   $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; viewLayer.clearLayers(); } });
   $("showClosed").addEventListener("change", () => applyFilter(true));
@@ -579,6 +654,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const hp = new URLSearchParams(location.hash.slice(1));
   if (hp.get("k")) { st.k = Math.max(1, Math.min(500, +hp.get("k") || 18)); $("kn").value = st.k; $("kr").value = Math.min(100, st.k); $("kout").textContent = st.k; }
   if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
+  try { $("vor1").checked = localStorage.getItem("vor1") === "1"; } catch (e) {}
   loadRows(EMBED.rows, EMBED.version);
   if (hp.get("id")) { const i = st.rows.findIndex(r => r[0] === +hp.get("id")); if (i >= 0) select(i, true); }
 })();
