@@ -57,10 +57,11 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 .radar .d { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .radar .sep { grid-template-columns: 1fr; color: var(--muted); font-size: 11.5px; margin-top: 4px; }
 #fold .fold-ico { display: none; }
-/* compact mode (phones; e.g. split screen with the game): no zoom / layer buttons (pinch, and the panel has the
-   base map), smaller buttons, the nearest station on one line, a smaller attribution (kept in full: CC BY 4.0) */
+/* compact mode (phones; e.g. split screen with the game): the zoom buttons move to the left below the nearest
+   station, no layer button (the panel has the base map), smaller buttons, the nearest station on one line, a smaller attribution (kept in full: CC BY 4.0) */
 @media (max-width: 640px) {
-  body.compact .leaflet-control-zoom, body.compact .leaflet-control-layers { display: none; }
+  body.compact .leaflet-control-layers { display: none; }
+  body.compact .leaflet-top.leaflet-left .leaflet-control-zoom { margin-top: 40px; margin-left: 6px; }
   body.compact .leaflet-top.leaflet-right .leaflet-control { margin-top: 6px; margin-right: 6px; }
   body.compact .geo-ctl a { width: 30px; height: 30px; }
   body.compact .geo-ctl a svg { width: 17px; height: 17px; }
@@ -383,7 +384,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   // ---------------- map
   const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([35.68, 139.76], 11);
-  L.control.zoom({ position: "topright" }).addTo(map);
+  const zoomCtl = L.control.zoom({ position: "topright" }).addTo(map);
   const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
   // load tiles while the map is still moving (Leaflet's default on phones waits until it stops) and keep
   // 4 rows of tiles beyond the screen, so going back and forth does not reload them
@@ -1311,6 +1312,9 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const m = $("compactMode").value, on = m === "on" || (m === "auto" && shortMq.matches);
     if (document.body.classList.contains("compact") === on) return;
     document.body.classList.toggle("compact", on);
+    // zoom buttons: on the left (under the nearest station) in compact mode, else back to the top of the right column
+    zoomCtl.setPosition(on ? "topleft" : "topright");
+    if (!on) { const c = zoomCtl.getContainer(); c.parentNode.insertBefore(c, c.parentNode.firstChild); }
     map.invalidateSize();
   }
   try { const cm = localStorage.getItem("compactMode"); if (["auto", "on", "off"].includes(cm)) $("compactMode").value = cm; } catch (e) {}
