@@ -104,6 +104,7 @@ input[type=range] { width: 100%; accent-color: var(--region); }
 .sugg button:hover, .sugg button.on { background: #eef2f8; }
 .sugg small { color: var(--muted); }
 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.4; }
+.check.sub-check { margin-left: 22px; font-size: 12.5px; }
 .check input { accent-color: var(--region); margin-top: 2px; }
 .sel { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 4px; }
 .sel .name { font-size: 18px; font-weight: 700; }
@@ -192,6 +193,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 
   <div class="field">
     <label class="check"><input type="checkbox" id="vor1"> 最寄り駅の境界を常に描く（1 次ボロノイ図・位置登録される駅の範囲）</label>
+    <label class="check sub-check"><input type="checkbox" id="vorNames"> 最寄り駅の境界に沿って、線の向こうの駅名を書く（ズーム 13 以上。画面に見えていない駅だけ）</label>
     <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき。未取得駅はより広い範囲でも）</label>
     <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
     <label class="check"><input type="checkbox" id="viewAll"> 表示中の全駅の境界を描く（k 次ボロノイ図）</label>
@@ -809,11 +811,60 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     draw(all, 12, 6, (r) => r[6] ? "#687089" : "#1d2433");
     draw(ua, 12, 7, (r) => r[6] ? "#8e44ad" : "#d1267a");
     if (st.sel >= 0 && st.rows[st.sel]) draw([st.sel], 14, 13, () => "#c2410c");
+    if ($("vorNames").checked) drawVorNames(ctx);
+  }
+  // Names along the nearest-station boundaries: each R_1(i) edge gets i's name on i's side, once (middle of the part
+  // on screen), when i itself is not visible, the edge is long enough and zoom >= VOR_NAME_MIN_ZOOM. The cell of the
+  // position's nearest station is named only while the nearest-station box is hidden. R_1 is convex, so i's side
+  // of an edge is the side facing the station point.
+  const VOR_NAME_MIN_ZOOM = 13;
+  function drawVorNames(ctx) {
+    if (!$("vor1").checked || map.getZoom() < VOR_NAME_MIN_ZOOM || !st.vorPolys || !st.vorPolys.length) return;
+    const a = visibleArea(), X0 = a.x0 + 2, X1 = a.x1 - 2, Y0 = 2, Y1 = a.y1 - 2;
+    const self = track.radar && !$("nearBox").hidden ? track.radar.near : -1;
+    const px = 12, color = st.style.vor.color;
+    ctx.font = `700 ${px}px ${nameFont}`; ctx.lineWidth = 3.5; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const [i, ll] of st.vorPolys) {
+      const r = st.rows[i]; if (!r || i === self) continue;
+      const sp = map.latLngToContainerPoint([r[4], r[5]]);
+      if (sp.x >= a.x0 && sp.x <= a.x1 && sp.y >= 0 && sp.y <= a.y1) continue; // the station is in sight
+      const tw = ctx.measureText(r[2]).width + 36;
+      const pts = ll.map(q => map.latLngToContainerPoint(q)), n = pts.length;
+      // join consecutive pieces of one straight edge (the sphere metric subdivides edges)
+      let k0 = 0;
+      while (k0 < n) {
+        const A = pts[k0]; let k1 = k0 + 1;
+        if (k1 > n) break;
+        const dir = Math.atan2(pts[k1 % n].y - A.y, pts[k1 % n].x - A.x);
+        while (k1 < n) {
+          const P = pts[k1 % n], Q = pts[(k1 + 1) % n], d2 = Math.atan2(Q.y - P.y, Q.x - P.x);
+          if (Math.abs(Math.atan2(Math.sin(d2 - dir), Math.cos(d2 - dir))) > 0.01) break;
+          k1++;
+        }
+        const B = pts[k1 % n]; k0 = k1;
+        // clip A-B to the visible area (Liang-Barsky)
+        const dx = B.x - A.x, dy = B.y - A.y; let t0 = 0, t1 = 1, ok = true;
+        for (const [pp, qq] of [[-dx, A.x - X0], [dx, X1 - A.x], [-dy, A.y - Y0], [dy, Y1 - A.y]]) {
+          if (pp === 0) { if (qq < 0) { ok = false; break; } continue; }
+          const t = qq / pp; if (pp < 0) { if (t > t1) { ok = false; break; } if (t > t0) t0 = t; } else { if (t < t0) { ok = false; break; } if (t < t1) t1 = t; }
+        }
+        const len = Math.hypot(dx, dy) * (t1 - t0);
+        if (!ok || len < tw) continue;
+        const tm = (t0 + t1) / 2, mx = A.x + dx * tm, my = A.y + dy * tm;
+        let ang = Math.atan2(dy, dx); if (Math.cos(ang) < 0) ang += Math.PI; // keep the text upright
+        let nx = -Math.sin(ang), ny = Math.cos(ang); // normal, flipped toward the station's side
+        if ((sp.x - mx) * nx + (sp.y - my) * ny < 0) { nx = -nx; ny = -ny; }
+        ctx.save(); ctx.translate(mx + nx * (px * 0.5 + 4), my + ny * (px * 0.5 + 4)); ctx.rotate(ang);
+        ctx.strokeText(r[2], 0, 0); ctx.fillStyle = color; ctx.fillText(r[2], 0, 0); ctx.restore();
+      }
+    }
+    ctx.textAlign = "start";
   }
   map.on("moveend", updateLabelsOnMove);
   map.on("resize", updateLabels);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateLabels); // redraw once the web font is in
   $("showNames").addEventListener("change", updateLabels);
+  $("vorNames").addEventListener("change", () => { try { localStorage.setItem("vorNames", $("vorNames").checked ? "1" : "0"); } catch (e) {} updateLabels(); });
 
   // ---------------- current position, tracking and notifications
   const track = { pos: null, watch: null, prev: null, lastUser: 0, me: null, acc: null, lastFix: 0, precise: false };
@@ -925,6 +976,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     if ($("radarMarks").checked) drawDots();
     renderRadarList(lat, lng);
     updateNearBox(lat, lng, near, simulated);
+    const vnKey = near + "|" + $("nearBox").hidden;
+    if ($("vorNames").checked && st.vorNameKey !== vnKey) { st.vorNameKey = vnKey; updateLabels(); }
     $("geoStatus").innerHTML =
       `${simulated ? "指定位置" : "現在地"}の最寄り：<b>${esc(r0[2])}</b>（${km(lat, lng, r0[4], r0[5])}${acc ? `・精度 ±${Math.round(acc)} m` : ""}）` +
       (st.sel >= 0 ? `<br>${esc(st.rows[st.sel][2])} は <b>${R.selRank} 位</b>（${inSel ? "圏内" : "圏外"}）` : "") +
@@ -1159,13 +1212,17 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   // order-1 diagram (nearest-station boundaries) for stations in view, independent of k.
   // ~0.5 ms per station and cached, so panning around is cheap after the first pass.
+  let vorNameRaf = 0;
   function drawVor() {
-    const job = ++st.vorJob; vorLayer.clearLayers();
-    if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("vor"); return; }
+    const job = ++st.vorJob; vorLayer.clearLayers(); st.vorPolys = [];
+    if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("vor"); if ($("vorNames").checked) updateLabels(); return; }
     st.vorDrawn = { zoom: map.getZoom(), bounds: map.getBounds().pad(0.2) };
     const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
     regionsAsync("vor", todo.map(i => [i, 1]), (out) => {
-      if (job === st.vorJob) L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
+      if (job !== st.vorJob) return;
+      L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
+      for (const o of out) st.vorPolys.push([o[0], o[2]]);
+      if ($("vorNames").checked && !vorNameRaf) vorNameRaf = requestAnimationFrame(() => { vorNameRaf = 0; updateLabels(); });
     });
   }
   map.on("moveend", () => { if ($("vor1").checked && !coveredBy(st.vorDrawn)) drawVor(); });
@@ -1509,7 +1566,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function restyle(kind) {
     const ls = lineStyle(kind);
     if (kind === "sel") regionLayer.eachLayer(l => l.setStyle({ ...ls, fillColor: ls.color, ...(l.tripleDash ? { dashArray: l.tripleDash } : {}) }));
-    if (kind === "vor") vorLayer.eachLayer(l => l.setStyle(ls));
+    if (kind === "vor") { vorLayer.eachLayer(l => l.setStyle(ls)); if ($("vorNames").checked) updateLabels(); }
     if (kind === "view") viewLayer.eachLayer(l => l.setStyle(ls));
     if (kind === "lv") levelLayer.eachLayer(l => l.setStyle({ ...ls, opacity: ls.opacity * lvOpacity(l.levelF) }));
   }
@@ -1555,6 +1612,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
   try {
     $("vor1").checked = localStorage.getItem("vor1") === "1";
+    $("vorNames").checked = localStorage.getItem("vorNames") === "1";
     const ro = JSON.parse(localStorage.getItem("radarOpts") || "{}"); for (const id of RADAR_OPTS) if (typeof ro[id] === "boolean") $(id).checked = ro[id];
     const bz = localStorage.getItem("bndZoom"); if (bz !== null && [...$("bndZoom").options].some(o => o.value === bz)) $("bndZoom").value = bz;
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
