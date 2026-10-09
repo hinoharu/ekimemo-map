@@ -7,6 +7,7 @@
     "build:fetch": "node scripts/py.js scripts/build.py --fetch",
     "test": "node tests/check_html.js && node tests/verify.js",
     "test:quick": "node tests/check_html.js && node tests/verify.js --quick",
-    "serve": "node scripts/serve.js 8000"
+    "serve": "node scripts/serve.js 8000",
+    "icons": "node scripts/make_icons.js a"
   }
 }
