@@ -1,0 +1,12 @@
+{
+  "name": "ekimemo-radar",
+  "private": true,
+  "description": "駅レーダー圏マップ: k次ボロノイ（レーダー k 駅以内の地域）を地図上に描く",
+  "scripts": {
+    "build": "node scripts/py.js scripts/build.py",
+    "build:fetch": "node scripts/py.js scripts/build.py --fetch",
+    "test": "node tests/check_html.js && node tests/verify.js",
+    "test:quick": "node tests/check_html.js && node tests/verify.js --quick",
+    "serve": "node scripts/serve.js 8000"
+  }
+}

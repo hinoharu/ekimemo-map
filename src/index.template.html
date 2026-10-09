@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>駅レーダー圏マップ</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed map with one floating instrument panel (top-left; bottom sheet on phones). */
+:root {
+  --paper: #fbfaf7;
+  --ink: #1d2433;
+  --muted: #687089;
+  --rule: #dcdfe6;
+  --region: #1f5fa8;
+  --station: #c2410c;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 14px; }
+#map { position: fixed; inset: 0; }
+.panel {
+  position: fixed; z-index: 1000; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
+  width: 320px; max-height: calc(100% - 24px); overflow: auto;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(29, 36, 51, 0.16); padding: 14px 16px; display: grid; gap: 12px;
+}
+@media (max-width: 640px) {
+  .panel { left: 8px; right: 8px; width: auto; top: auto; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); max-height: 48%; }
+}
+.panel.collapsed > :not(.head) { display: none; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: 0.04em; }
+.head button { border: none; background: none; color: var(--muted); font: inherit; cursor: pointer; padding: 2px 4px; }
+.field { display: grid; gap: 5px; }
+.label { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; }
+.label output { font-family: var(--font-data); font-size: 18px; color: var(--region); letter-spacing: 0; }
+input[type=text], input[type=number], select {
+  font: inherit; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 7px 9px; width: 100%; box-sizing: border-box;
+}
+input[type=range] { width: 100%; accent-color: var(--region); }
+.krow { display: grid; grid-template-columns: 1fr 64px; gap: 8px; align-items: center; }
+.search { position: relative; }
+.sugg { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; background: #fff; border: 1px solid var(--rule); border-top: none; border-radius: 0 0 4px 4px; max-height: 260px; overflow: auto; }
+.sugg button { display: flex; width: 100%; justify-content: space-between; gap: 8px; border: none; background: none; padding: 7px 9px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.sugg button:hover, .sugg button.on { background: #eef2f8; }
+.sugg small { color: var(--muted); }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.4; }
+.check input { accent-color: var(--region); margin-top: 2px; }
+.sel { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 4px; }
+.sel .name { font-size: 18px; font-weight: 700; }
+.sel .name small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+.stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.note { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.btn { font: inherit; font-size: 12.5px; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+:focus-visible { outline: 2px solid var(--region); outline-offset: 1px; }
+.rank { font-size: 12.5px; min-width: 200px; }
+.rank h3 { font-size: 13px; margin: 0 0 6px; }
+.rank ol { margin: 0; padding: 0; list-style: none; max-height: 220px; overflow: auto; }
+.rank li { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 6px; padding: 1px 0; }
+.rank li.me { color: var(--region); font-weight: 700; }
+.rank .n, .rank .d { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.rank .n { color: var(--muted); text-align: right; }
+.rank .verdict { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); }
+.leaflet-container { font-family: var(--font-body); }
+.lbl-wrap { background: none; border: none; }
+.lbl { display: inline-block; font-size: 11px; font-weight: 500; color: var(--ink); white-space: nowrap; pointer-events: none;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 1px #fff; }
+.lbl.closed { color: var(--muted); }
+.lbl.on { color: var(--station); font-weight: 700; font-size: 13px; }
+.geo { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 6px; }
+.geo .label { margin-bottom: 2px; }
+.status { font-size: 12.5px; line-height: 1.5; }
+.status b { color: var(--region); }
+.log { margin: 0; padding: 0; list-style: none; max-height: 132px; overflow: auto; font-size: 12px; display: grid; gap: 3px; }
+.log li { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
+.log time { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+</style>
+</head>
+<body>
+<div id="map" role="application" aria-label="地図"></div>
+
+<section class="panel" id="panel">
+  <div class="head">
+    <h1>駅レーダー圏マップ</h1>
+    <button id="fold" aria-expanded="true">たたむ</button>
+  </div>
+
+  <div class="field search">
+    <label class="label" for="q">駅</label>
+    <input type="text" id="q" placeholder="駅名・よみで検索（地図の駅をクリックでも可）" autocomplete="off">
+    <div class="sugg" id="sugg" hidden></div>
+  </div>
+
+  <div class="field">
+    <div class="label"><label for="kr">レーダー k 個以内</label><output id="kout">18</output></div>
+    <div class="krow">
+      <input type="range" id="kr" min="1" max="100" value="18" aria-label="k（スライダー）">
+      <input type="number" id="kn" min="1" max="500" value="18" aria-label="k（数値）">
+    </div>
+  </div>
+
+  <div class="field">
+    <label class="label" for="metric">距離の測り方</label>
+    <select id="metric">
+      <option value="flat" selected>緯度・経度をそのまま平面とみなす</option>
+      <option value="cos">平面・経度を cos 36° で縮める</option>
+      <option value="sphere">球面（大圏距離）</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label class="label" for="clip">計算範囲（駅からの四角い窓）</label>
+    <select id="clip">
+      <option value="1">±1°（約100 km）</option>
+      <option value="3" selected>±3°（約300 km）</option>
+      <option value="10">±10°</option>
+      <option value="0">全国の枠（遅くなります）</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
+    <label class="check"><input type="checkbox" id="viewAll"> 表示中の全駅の境界を描く（k 次ボロノイ図）</label>
+    <label class="check"><input type="checkbox" id="showClosed" checked> 廃駅も含める</label>
+    <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき）</label>
+  </div>
+
+  <div class="sel" id="selbox"></div>
+
+  <div class="geo">
+    <div class="label">現在地と通知</div>
+    <label class="check"><input type="checkbox" id="geoOn"> 現在地を使う</label>
+    <label class="check"><input type="checkbox" id="follow" checked> 地図を現在地に追従する（手で動かした後は 15 秒待つ）</label>
+    <label class="check"><input type="checkbox" id="nNear" checked> 最寄り駅が変わったら通知</label>
+    <label class="check"><input type="checkbox" id="nSet"> レーダー k 駅の顔ぶれが変わったら通知</label>
+    <label class="check"><input type="checkbox" id="nSel" checked> 選んだ駅の圏内に出入りしたら通知</label>
+    <div class="row"><button class="btn" id="notifPerm">端末の通知を許可する</button></div>
+    <div class="status" id="geoStatus">現在地は使っていません。</div>
+    <ol class="log" id="log" aria-live="polite"></ol>
+    <div class="note">テスト用：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします。</div>
+  </div>
+
+  <div class="field">
+    <div class="note" id="datainfo"></div>
+    <div><button class="btn" id="refresh">GitHub から最新データを取得</button></div>
+    <div class="note">地図の何もない所をクリックすると、その地点のレーダー順位を表示します。</div>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/*CORE*/
+</script>
+<script>
+const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
+</script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const RAW_CSV = "https://raw.githubusercontent.com/Seo-4d696b75/station_database/main/out/main/station.csv";
+  const RAW_INFO = "https://raw.githubusercontent.com/Seo-4d696b75/station_database/main/latest_info.json";
+
+  // ---------------- state
+  const st = {
+    all: [], rows: [], idx: null, version: EMBED.version,
+    sel: -1, k: 18, metric: "flat", clip: 3,
+    cache: new Map(), viewJob: 0, levelJob: 0,
+  };
+
+  // ---------------- map
+  const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([35.68, 139.76], 11);
+  L.control.zoom({ position: "topright" }).addTo(map);
+  const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  });
+  const gsi = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
+    maxZoom: 18, attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>',
+  });
+  osm.addTo(map);
+  L.control.layers({ "OpenStreetMap": osm, "地理院 淡色": gsi }, null, { position: "topright" }).addTo(map);
+  map.attributionControl.addAttribution('駅データ: <a href="https://github.com/Seo-4d696b75/station_database">station_database</a> (CC BY 4.0)');
+
+  const canvasR = L.canvas({ padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
+  const stationLayer = L.layerGroup().addTo(map);
+  const viewLayer = L.layerGroup().addTo(map);
+  const levelLayer = L.layerGroup().addTo(map);
+  const regionLayer = L.layerGroup().addTo(map);
+  const labelLayer = L.layerGroup().addTo(map);
+  const meLayer = L.layerGroup().addTo(map);
+  let markers = [];
+
+  // ---------------- data
+  function loadRows(rows, version) {
+    st.all = rows; st.version = version;
+    applyFilter(false);
+  }
+  function applyFilter(keepSel) {
+    const prevId = st.sel >= 0 ? st.rows[st.sel][0] : null;
+    st.rows = $("showClosed").checked ? st.all : st.all.filter(r => !r[6]);
+    const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
+    st.idx = makeIndex(lat, lng);
+    st.cache.clear();
+    drawStations();
+    $("datainfo").textContent = `駅データ main 版 ${fmtVer(st.version)}・${st.rows.length.toLocaleString()} 駅`;
+    let sel = -1;
+    if (keepSel && prevId != null) sel = st.rows.findIndex(r => r[0] === prevId);
+    if (sel < 0) sel = st.rows.findIndex(r => r[2] === "東京");
+    select(sel, !keepSel);
+  }
+  const fmtVer = (v) => /^\d{8}$/.test(v) ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6)}` : v;
+
+  function drawStations() {
+    stationLayer.clearLayers(); markers = [];
+    st.rows.forEach((r, i) => {
+      const m = L.circleMarker([r[4], r[5]], {
+        renderer: canvasR, radius: 3, weight: 1, color: "#fff", fillColor: r[6] ? "#9aa0ad" : "#c2410c", fillOpacity: 0.95,
+      });
+      m.bindTooltip(r[2] + (r[6] ? "（廃駅）" : ""), { direction: "top", offset: [0, -4] });
+      m.on("click", (e) => { L.DomEvent.stopPropagation(e); select(i, false); map.panTo([r[4], r[5]]); });
+      m.addTo(stationLayer); markers.push(m);
+    });
+  }
+
+  // ---------------- region computation (cached)
+  function region(i, k) {
+    const key = `${st.metric}|${st.clip}|${k}|${i}`;
+    let R = st.cache.get(key);
+    if (!R) { R = regionOf(st.idx, i, k, st.metric, st.clip); st.cache.set(key, R); }
+    return R;
+  }
+
+  function select(i, fly) {
+    st.sel = i;
+    if (i < 0) return;
+    const r = st.rows[i];
+    $("q").value = r[2];
+    redraw(fly);
+    try { history.replaceState(null, "", `#id=${r[0]}&k=${st.k}&m=${st.metric}`); } catch (e) {}
+  }
+
+  function redraw(fly) {
+    regionLayer.clearLayers(); levelLayer.clearLayers();
+    markers.forEach((m, j) => m.setRadius(j === st.sel ? 7 : 3));
+    if (st.sel < 0) return;
+    const r = st.rows[st.sel];
+    const t0 = performance.now();
+    const R = region(st.sel, st.k);
+    const ms = performance.now() - t0;
+    const poly = L.polygon(R.latlng, { color: "#1f5fa8", weight: 2, fillColor: "#1f5fa8", fillOpacity: 0.16, interactive: false });
+    poly.addTo(regionLayer);
+    if (fly) map.fitBounds(poly.getBounds(), { padding: [40, 40], maxZoom: 13 });
+    const area = sphericalArea(R.latlng);
+    $("selbox").innerHTML =
+      `<div class="name">${esc(r[2])}<small>${esc(r[3])}${r[6] ? "・廃駅" : ""}</small></div>` +
+      `<dl class="stats">` +
+      `<dt>${st.k} 位以内の地域の面積</dt><dd>${area < 100 ? area.toFixed(1) : Math.round(area).toLocaleString()} km²</dd>` +
+      `<dt>計算時間</dt><dd>${(R.ms ?? ms).toFixed(1)} ms</dd>` +
+      `<dt>使った二等分線</dt><dd>${R.lines} 本</dd>` +
+      `<dt>境界の頂点</dt><dd>${R.local.length} 個</dd></dl>`;
+    if ($("levels").checked) drawLevels();
+    if ($("viewAll").checked) drawView();
+    updateLabels();
+    track.prev = null; if (track.pos) evaluate(false); // settings changed: re-baseline without notifying
+  }
+
+  // ---------------- station names
+  function updateLabels() {
+    labelLayer.clearLayers();
+    if (!$("showNames").checked || map.getZoom() < 12 || !st.rows.length) return;
+    const b = map.getBounds(), ids = [];
+    for (let i = 0; i < st.rows.length; i++) if (b.contains([st.rows[i][4], st.rows[i][5]])) ids.push(i);
+    if (st.sel >= 0 && !ids.includes(st.sel)) ids.push(st.sel);
+    if (ids.length > 450) return; // too crowded to read; zoom in
+    for (const i of ids) {
+      const r = st.rows[i], cls = "lbl" + (i === st.sel ? " on" : "") + (r[6] ? " closed" : "");
+      L.marker([r[4], r[5]], {
+        icon: L.divIcon({ className: "lbl-wrap", html: `<span class="${cls}">${esc(r[2])}</span>`, iconSize: null, iconAnchor: i === st.sel ? [-10, 9] : [-6, 8] }),
+        interactive: false, keyboard: false,
+      }).addTo(labelLayer);
+    }
+  }
+  map.on("moveend", updateLabels);
+  $("showNames").addEventListener("change", updateLabels);
+
+  // ---------------- current position, tracking and notifications
+  const track = { pos: null, watch: null, prev: null, lastUser: 0, me: null, acc: null };
+  map.on("dragstart", () => { track.lastUser = Date.now(); });
+
+  function rankAt(lat, lng) {
+    const n = st.rows.length, K = Math.max(1, st.k), top = [];
+    const selKey = st.sel >= 0 ? distKey(st.idx, st.metric, lat, lng, st.sel) : null;
+    let selRank = 1;
+    for (let t = 0; t < n; t++) {
+      const d = distKey(st.idx, st.metric, lat, lng, t);
+      if (selKey !== null && t !== st.sel && d < selKey) selRank++;
+      if (top.length < K || d < top[top.length - 1][0]) {
+        let p = top.length < K ? top.length : K - 1;
+        if (top.length < K) top.push(null);
+        while (p > 0 && top[p - 1][0] > d) { top[p] = top[p - 1]; p--; }
+        top[p] = [d, t];
+      }
+    }
+    return { top: top.map(x => x[1]), selRank };
+  }
+
+  function setPosition(lat, lng, acc, simulated) {
+    track.pos = { lat, lng, acc, simulated };
+    if (!track.me) {
+      track.acc = L.circle([lat, lng], { radius: acc || 0, color: "#2563eb", weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false }).addTo(meLayer);
+      track.me = L.circleMarker([lat, lng], { radius: 7, color: "#fff", weight: 2.5, fillColor: "#2563eb", fillOpacity: 1, interactive: false }).addTo(meLayer);
+    }
+    track.me.setLatLng([lat, lng]); track.acc.setLatLng([lat, lng]).setRadius(acc || 0);
+    if ($("follow").checked && Date.now() - track.lastUser > 15000) map.panTo([lat, lng], { animate: true });
+    evaluate(true);
+  }
+
+  // compare the radar at the current position with the previous one and notify on changes
+  function evaluate(notifyChanges) {
+    if (!track.pos || !st.rows.length) return;
+    const { lat, lng, acc, simulated } = track.pos;
+    const R = rankAt(lat, lng), near = R.top[0], set = new Set(R.top);
+    const inSel = st.sel >= 0 && R.selRank <= st.k;
+    const P = track.prev;
+    if (notifyChanges && P) {
+      const nm = (i) => st.rows[i][2];
+      if ($("nNear").checked && P.near !== near) notify(`最寄り駅が変わりました：${nm(P.near)} → ${nm(near)}`);
+      if ($("nSet").checked) {
+        const inn = R.top.filter(i => !P.set.has(i)), out = [...P.set].filter(i => !set.has(i));
+        if (inn.length || out.length) notify(`レーダーの顔ぶれ：${inn.length ? "＋" + inn.map(nm).join("・") : ""}${inn.length && out.length ? " / " : ""}${out.length ? "－" + out.map(nm).join("・") : ""}`);
+      }
+      if ($("nSel").checked && st.sel >= 0 && P.sel === st.sel && P.inSel !== inSel)
+        notify(inSel ? `${nm(st.sel)} の圏内に入りました（${R.selRank} 位）` : `${nm(st.sel)} の圏外に出ました（${R.selRank} 位）`);
+    }
+    track.prev = { near, set, inSel, sel: st.sel };
+    const r0 = st.rows[near];
+    $("geoStatus").innerHTML =
+      `${simulated ? "テスト位置" : "現在地"}の最寄り：<b>${esc(r0[2])}</b>（${km(lat, lng, r0[4], r0[5])}${acc ? `・精度 ±${Math.round(acc)} m` : ""}）` +
+      (st.sel >= 0 ? `<br>${esc(st.rows[st.sel][2])} は <b>${R.selRank} 位</b>（${inSel ? "圏内" : "圏外"}）` : "");
+  }
+
+  function notify(msg) {
+    toast(msg);
+    const li = document.createElement("li"), d = new Date();
+    li.innerHTML = `<time>${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}</time><span>${esc(msg)}</span>`;
+    $("log").prepend(li);
+    while ($("log").children.length > 30) $("log").lastChild.remove();
+    try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {}
+    try {
+      if ("Notification" in window && Notification.permission === "granted") new Notification("駅レーダー圏マップ", { body: msg, tag: "radar", renotify: true });
+    } catch (e) { /* some mobile browsers only allow notifications from a service worker */ }
+  }
+
+  function startGeo() {
+    if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; $("geoOn").checked = false; return; }
+    if (!window.isSecureContext) $("geoStatus").textContent = "https か localhost で開いていないため、現在地を取得できない可能性があります。";
+    else $("geoStatus").textContent = "現在地を取得しています…";
+    track.watch = navigator.geolocation.watchPosition(
+      (p) => setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false),
+      (err) => {
+        const why = err.code === 1 ? "位置情報の利用が許可されていません。ブラウザの設定で許可してください。"
+                  : err.code === 2 ? "現在地を特定できませんでした。" : "現在地の取得がタイムアウトしました。しばらく待つと再試行します。";
+        $("geoStatus").textContent = why + (window.isSecureContext ? "" : "（https か localhost で開く必要があります）");
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  }
+  function stopGeo() {
+    if (track.watch !== null) navigator.geolocation.clearWatch(track.watch);
+    track.watch = null;
+    $("geoStatus").textContent = track.pos ? "現在地の更新を止めました。" : "現在地は使っていません。";
+  }
+  $("geoOn").addEventListener("change", () => $("geoOn").checked ? startGeo() : stopGeo());
+  $("follow").addEventListener("change", () => { if ($("follow").checked && track.pos) { track.lastUser = 0; map.panTo([track.pos.lat, track.pos.lng]); } });
+  setInterval(() => { // periodic re-centering
+    if ($("follow").checked && track.pos && Date.now() - track.lastUser > 15000) {
+      const c = map.getCenter();
+      if (Math.abs(c.lat - track.pos.lat) + Math.abs(c.lng - track.pos.lng) > 1e-5) map.panTo([track.pos.lat, track.pos.lng]);
+    }
+  }, 10000);
+  $("notifPerm").addEventListener("click", async () => {
+    if (!("Notification" in window)) { toast("このブラウザは端末の通知に対応していません。画面内の通知と振動で知らせます。"); return; }
+    const r = await Notification.requestPermission();
+    toast(r === "granted" ? "端末の通知を許可しました。" : "通知は許可されませんでした。画面内の通知と振動で知らせます。");
+  });
+  map.on("contextmenu", (e) => { track.lastUser = Date.now(); setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
+
+  // contours R_1 ... R_k (async, cheap per level)
+  function drawLevels() {
+    const job = ++st.levelJob, i = st.sel, K = st.k;
+    let j = 1;
+    const step = () => {
+      if (job !== st.levelJob) return;
+      const t = performance.now();
+      while (j < K && performance.now() - t < 24) {
+        const R = region(i, j);
+        const f = j / K;
+        L.polygon(R.latlng, { color: "#1f5fa8", weight: 1, opacity: 0.25 + 0.5 * (1 - f), fill: false, interactive: false }).addTo(levelLayer);
+        j++;
+      }
+      if (j < K) setTimeout(step, 0);
+    };
+    step();
+  }
+
+  // order-k diagram for stations in view (async, capped)
+  function drawView() {
+    const job = ++st.viewJob; viewLayer.clearLayers();
+    if (!$("viewAll").checked) return;
+    const b = map.getBounds().pad(0.1), c = map.getCenter();
+    const ids = [];
+    st.rows.forEach((r, i) => { if (b.contains([r[4], r[5]])) ids.push(i); });
+    ids.sort((a, z) => (st.rows[a][4] - c.lat) ** 2 + (st.rows[a][5] - c.lng) ** 2 - (st.rows[z][4] - c.lat) ** 2 - (st.rows[z][5] - c.lng) ** 2);
+    const CAP = 800, todo = ids.slice(0, CAP);
+    let q = 0;
+    const step = () => {
+      if (job !== st.viewJob) return;
+      const t = performance.now(), batch = [];
+      while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], st.k).latlng); q++; }
+      if (batch.length) L.polygon(batch, { renderer: canvasR, color: "#3b4660", weight: 0.8, opacity: 0.45, fill: false, interactive: false }).addTo(viewLayer);
+      if (q < todo.length) setTimeout(step, 0);
+    };
+    step();
+    if (ids.length > CAP) toast(`表示範囲の駅が多いため、中心に近い ${CAP} 駅だけ描いています。拡大すると全部描けます。`);
+  }
+  map.on("moveend", () => { if ($("viewAll").checked) drawView(); });
+
+  // ---------------- ranking at a clicked point
+  map.on("click", (e) => {
+    const { lat, lng } = e.latlng, n = st.rows.length;
+    const K = Math.max(st.k, 5), top = [];
+    let selKey = st.sel >= 0 ? distKey(st.idx, st.metric, lat, lng, st.sel) : null, selRank = 1;
+    for (let t = 0; t < n; t++) {
+      const d = distKey(st.idx, st.metric, lat, lng, t);
+      if (selKey !== null && t !== st.sel && d < selKey) selRank++;
+      if (top.length < K || d < top[top.length - 1][0]) {
+        let p = top.length < K ? top.length : K - 1;
+        if (top.length < K) top.push(null);
+        while (p > 0 && top[p - 1][0] > d) { top[p] = top[p - 1]; p--; }
+        top[p] = [d, t];
+      }
+    }
+    const items = top.slice(0, st.k).map(([, t], q) =>
+      `<li class="${t === st.sel ? "me" : ""}"><span class="n">${q + 1}</span><span>${esc(st.rows[t][2])}</span><span class="d">${km(lat, lng, st.rows[t][4], st.rows[t][5])}</span></li>`).join("");
+    const verdict = st.sel < 0 ? "" :
+      `<div class="verdict">${esc(st.rows[st.sel][2])} は <b>${selRank} 位</b>（${selRank <= st.k ? "レーダー圏内" : "圏外"}）</div>`;
+    L.popup({ maxWidth: 280 }).setLatLng(e.latlng)
+      .setContent(`<div class="rank"><h3>この地点のレーダー（上位 ${st.k}）</h3><ol>${items}</ol>${verdict}<div class="note">順位は「${METRIC_NAME[st.metric]}」で決め、km は実際の地表距離です。</div></div>`).openOn(map);
+  });
+
+  // ---------------- helpers
+  function km(a1, o1, a2, o2) {
+    const R = 6371.0088, p1 = a1 * DEG, p2 = a2 * DEG, dp = p2 - p1, dl = (o2 - o1) * DEG;
+    const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+    const d = 2 * R * Math.asin(Math.sqrt(h));
+    return d < 10 ? d.toFixed(2) + " km" : d.toFixed(1) + " km";
+  }
+  function sphericalArea(ll) { // km², via local equal-area approximation per polygon (fine at this scale)
+    const R = 6371.0088; let s = 0;
+    for (let i = 0; i < ll.length; i++) {
+      const [a1, o1] = ll[i], [a2, o2] = ll[(i + 1) % ll.length];
+      s += (o2 - o1) * DEG * (2 + Math.sin(a1 * DEG) + Math.sin(a2 * DEG));
+    }
+    return Math.abs(s * R * R / 2);
+  }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let toastTimer;
+  function toast(msg) {
+    let el = document.getElementById("toast");
+    if (!el) { el = document.createElement("div"); el.id = "toast"; el.setAttribute("role", "status");
+      el.style.cssText = "position:fixed;z-index:1100;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:#1d2433;color:#fff;padding:8px 14px;border-radius:4px;font-size:13px;max-width:90%;";
+      document.body.appendChild(el); }
+    el.textContent = msg; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 4000);
+  }
+
+  // ---------------- controls
+  function setK(v) {
+    v = Math.max(1, Math.min(500, Math.round(+v || 1)));
+    st.k = v; $("kout").textContent = v; $("kn").value = v; $("kr").value = Math.min(100, v);
+    redraw(false);
+    if (st.sel >= 0) try { history.replaceState(null, "", `#id=${st.rows[st.sel][0]}&k=${st.k}&m=${st.metric}`); } catch (e) {}
+  }
+  $("kr").addEventListener("input", () => { $("kout").textContent = $("kr").value; $("kn").value = $("kr").value; st.k = +$("kr").value; redraw(false); });
+  $("kn").addEventListener("change", () => setK($("kn").value));
+  $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); });
+  $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); });
+  $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
+  $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; viewLayer.clearLayers(); } });
+  $("showClosed").addEventListener("change", () => applyFilter(true));
+  $("fold").addEventListener("click", () => {
+    const p = $("panel"); p.classList.toggle("collapsed");
+    const c = p.classList.contains("collapsed"); $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+  });
+
+  // search
+  const kataToHira = (s) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  let suggIdx = [], suggOn = -1;
+  $("q").addEventListener("input", () => {
+    const q = kataToHira($("q").value.trim());
+    const box = $("sugg");
+    if (!q) { box.hidden = true; return; }
+    const exact = [], pre = [], part = [];
+    st.rows.forEach((r, i) => {
+      const nm = r[2], kn = r[3];
+      if (nm === q || kn === q) exact.push(i);
+      else if (nm.startsWith(q) || kn.startsWith(q)) pre.push(i);
+      else if (nm.includes(q)) part.push(i);
+    });
+    suggIdx = exact.concat(pre, part).slice(0, 12); suggOn = -1;
+    box.innerHTML = suggIdx.map((i, q2) => {
+      const r = st.rows[i];
+      return `<button type="button" data-i="${i}"><span>${esc(r[2])}${r[6] ? "（廃）" : ""}</span><small>${esc(PREF[r[7]] || "")}</small></button>`;
+    }).join("") || `<div class="note" style="padding:7px 9px">見つかりません</div>`;
+    box.hidden = false;
+  });
+  $("sugg").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    $("sugg").hidden = true; select(+b.dataset.i, true);
+  });
+  $("q").addEventListener("keydown", (e) => {
+    const btns = [...$("sugg").querySelectorAll("button")];
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault(); if (!btns.length) return;
+      suggOn = (suggOn + (e.key === "ArrowDown" ? 1 : -1) + btns.length) % btns.length;
+      btns.forEach((b, j) => b.classList.toggle("on", j === suggOn));
+    } else if (e.key === "Enter") {
+      const b = btns[Math.max(0, suggOn)]; if (b) { $("sugg").hidden = true; select(+b.dataset.i, true); }
+    } else if (e.key === "Escape") $("sugg").hidden = true;
+  });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".search")) $("sugg").hidden = true; });
+
+  // refresh from GitHub
+  $("refresh").addEventListener("click", async () => {
+    const btn = $("refresh"); btn.disabled = true; btn.textContent = "取得中…";
+    try {
+      let ver = "";
+      try { ver = String((await (await fetch(RAW_INFO, { cache: "no-store" })).json()).version); } catch (e) {}
+      const res = await fetch(RAW_CSV, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const rows = parseStationCsv(await res.text());
+      if (rows.length < 1000) throw new Error("駅の数が少なすぎます");
+      loadRows(rows, ver || "最新");
+      toast(`最新データを読み込みました（${rows.length.toLocaleString()} 駅）`);
+    } catch (e) {
+      toast(`取得できませんでした（${e.message}）。同梱のデータ（${fmtVer(EMBED.version)}）のまま使えます。`);
+    } finally { btn.disabled = false; btn.textContent = "GitHub から最新データを取得"; }
+  });
+  function parseStationCsv(text) {
+    const lines = [], re = /("([^"]|"")*"|[^,\r\n]*)(,|\r?\n|$)/g;
+    let row = [], m;
+    while ((m = re.exec(text)) && m[0] !== "") {
+      let v = m[1]; if (v.startsWith('"')) v = v.slice(1, -1).replace(/""/g, '"');
+      row.push(v);
+      if (m[3] !== ",") { lines.push(row); row = []; }
+    }
+    const h = lines[0], col = (n) => h.indexOf(n);
+    const ci = { id: col("id"), code: col("code"), name: col("name"), kana: col("name_kana"), lat: col("lat"), lng: col("lng"), closed: col("closed"), pref: col("prefecture") };
+    return lines.slice(1).filter(r => r.length >= h.length).map(r => [
+      +r[ci.id], +r[ci.code], r[ci.name], r[ci.kana], +r[ci.lat], +r[ci.lng],
+      (r[ci.closed] === "1" || r[ci.closed] === "true") ? 1 : 0, +r[ci.pref]]);
+  }
+
+  const METRIC_NAME = { flat: "緯度経度の平面", cos: "cos 36° 補正の平面", sphere: "球面" };
+  const PREF = ["", "北海道", "青森", "岩手", "宮城", "秋田", "山形", "福島", "茨城", "栃木", "群馬", "埼玉", "千葉", "東京", "神奈川", "新潟", "富山", "石川", "福井", "山梨", "長野", "岐阜", "静岡", "愛知", "三重", "滋賀", "京都", "大阪", "兵庫", "奈良", "和歌山", "鳥取", "島根", "岡山", "広島", "山口", "徳島", "香川", "愛媛", "高知", "福岡", "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島", "沖縄"];
+
+  // ---------------- boot (restore #id=..&k=..&m=.. if present)
+  const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.get("k")) { st.k = Math.max(1, Math.min(500, +hp.get("k") || 18)); $("kn").value = st.k; $("kr").value = Math.min(100, st.k); $("kout").textContent = st.k; }
+  if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
+  loadRows(EMBED.rows, EMBED.version);
+  if (hp.get("id")) { const i = st.rows.findIndex(r => r[0] === +hp.get("id")); if (i >= 0) select(i, true); }
+})();
+</script>
+</body>
+</html>
