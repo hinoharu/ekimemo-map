@@ -106,6 +106,15 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .sty .ctl { display: grid; grid-template-columns: 34px 74px 1fr 64px; gap: 6px; align-items: center; }
 .sty input[type=color] { width: 34px; height: 28px; padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: #fff; }
 .sty select { padding: 4px 6px; font-size: 12px; }
+/* current-position dot: a ripple each time a new position is received; grey while the location is not in use */
+.me-wrap { background: none; border: none; }
+.me-dot { position: relative; width: 18px; height: 18px; }
+.me-dot .core { position: absolute; inset: 0; box-sizing: border-box; border-radius: 50%; background: #2563eb; border: 2.5px solid #fff; box-shadow: 0 1px 4px rgba(29, 36, 51, 0.35); }
+.me-dot .ring { position: absolute; inset: 0; border-radius: 50%; background: rgba(37, 99, 235, 0.45); opacity: 0; }
+.me-dot.ping .ring { animation: me-ping 1.1s ease-out; }
+.me-dot.off .core { background: #8a93a6; }
+@keyframes me-ping { from { transform: scale(1); opacity: 0.8; } to { transform: scale(3.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .me-dot.ping .ring { animation: none; } }
 /* location buttons on the map (Leaflet control, under the zoom buttons) */
 .geo-ctl a { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; line-height: 0; color: var(--ink); cursor: pointer; }
 .geo-ctl a svg { width: 20px; height: 20px; }
@@ -279,10 +288,9 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   map.createPane("stations").style.zIndex = 450;
   const canvasR = L.canvas({ pane: "stations", padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
   const lineR = L.canvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
-  // current-position dot: above the station dots and name labels (markerPane 600; tooltips 650 and
-  // popups 700 stay on top), click-through so it never hides the stations from taps
+  // current-position dot (an HTML marker, so it can animate): above the station dots and name labels
+  // (markerPane 600; tooltips 650 and popups 700 stay on top), click-through so it never hides the stations from taps
   const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
-  const meR = L.canvas({ pane: "me", padding: 0.3 });
   const stationLayer = L.layerGroup().addTo(map);
   // unacquired-station areas: filled at full opacity on their own panes, the pane opacity makes
   // the union look uniform (overlaps don't get darker); click-through
@@ -476,9 +484,11 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     track.pos = { lat, lng, acc, simulated };
     if (!track.me) {
       track.acc = L.circle([lat, lng], { renderer: lineR, radius: acc || 0, color: "#2563eb", weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false }).addTo(meLayer);
-      track.me = L.circleMarker([lat, lng], { renderer: meR, radius: 7, color: "#fff", weight: 2.5, fillColor: "#2563eb", fillOpacity: 1, interactive: false }).addTo(meLayer);
+      track.me = L.marker([lat, lng], { pane: "me", interactive: false, keyboard: false,
+        icon: L.divIcon({ className: "me-wrap", html: '<div class="me-dot"><span class="ring"></span><span class="core"></span></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(meLayer);
     }
     track.me.setLatLng([lat, lng]); track.acc.setLatLng([lat, lng]).setRadius(acc || 0);
+    meDotState();
     if (following() && !paused()) centerOn(lat, lng, { animate: true });
     evaluate(true);
     geoCtl.update();
@@ -528,6 +538,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     } catch (e) { /* some mobile browsers only allow notifications from a service worker */ }
   }
 
+  const meDot = () => track.me && track.me.getElement() && track.me.getElement().firstChild;
+  function pingMe() { // restart the ripple animation
+    const d = meDot(); if (!d) return;
+    d.classList.remove("ping"); void d.offsetWidth; d.classList.add("ping");
+  }
+  function meDotState() { const d = meDot(); if (d) d.classList.toggle("off", !geoOn() && !track.pos.simulated); }
   // geoOn: watching the location. following: also keep it centered (paused for 15 s after a drag).
   const geoOn = () => track.watch !== null;
   const following = () => geoOn() && $("geoFollow").checked;
@@ -540,6 +556,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const first = !track.precise && !track.lastFix && following();
     track.lastFix = now; if (!quick) track.precise = true;
     setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false);
+    pingMe();
     if (first && $("autoZoom").checked) { const z = Math.max(map.getZoom(), 14); map.setView(centerFor(p.coords.latitude, p.coords.longitude, z), z); }
   }
   function startGeo() {
@@ -574,6 +591,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     if (track.watch !== null) navigator.geolocation.clearWatch(track.watch);
     track.watch = null;
     $("geoStatus").textContent = track.pos ? "現在地の更新を止めました。" : "現在地は使っていません。";
+    if (track.pos) meDotState();
     geoCtl.update();
   }
   function jumpToMe() {
