@@ -173,7 +173,17 @@ details.sub[open] > summary { margin-bottom: 4px; }
   <div class="geo">
     <div class="label">現在地と通知</div>
     <label class="check"><input type="checkbox" id="geoUse"> 現在地を使う</label>
-    <label class="check"><input type="checkbox" id="geoFollow" checked> 現在地を常に地図の中心に保つ（手で動かすと 15 秒止まる）</label>
+    <label class="check"><input type="checkbox" id="geoFollow" checked> 現在地を常に地図の中心に保つ</label>
+    <div class="field">
+      <label class="label" for="followPause">中心に保っているときに手で地図を動かしたら</label>
+      <select id="followPause">
+        <option value="0">すぐ現在地に戻す（止めない）</option>
+        <option value="5">5 秒止めてから戻す</option>
+        <option value="15" selected>15 秒止めてから戻す</option>
+        <option value="30">30 秒止めてから戻す</option>
+        <option value="off">追従をやめる（ボタンで再開）</option>
+      </select>
+    </div>
     <div class="row"><button class="btn" id="geoCenter">いますぐ現在地を中心に</button></div>
     <div class="note">地図右上の 3 つのボタン（上から：現在地を使う／常に中心に保つ／いますぐ中心に）でも同じ操作ができます。</div>
     <div class="field">
@@ -421,7 +431,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   // ---------------- current position, tracking and notifications
   const track = { pos: null, watch: null, prev: null, lastUser: 0, me: null, acc: null, lastFix: 0, precise: false };
-  map.on("dragstart", () => { track.lastUser = Date.now(); });
+  // what a manual drag does while following: pause for N seconds, or turn following off
+  const pauseMs = () => $("followPause").value === "off" ? 0 : +$("followPause").value * 1000;
+  const paused = () => track.dragging || Date.now() - track.lastUser < pauseMs();
+  map.on("dragstart", () => {
+    track.dragging = true; track.lastUser = Date.now();
+    if (following() && $("followPause").value === "off") setFollow(false);
+  });
+  map.on("dragend", () => {
+    track.dragging = false; track.lastUser = Date.now();
+    // "never pause": return once the drag's inertia has settled (a pan started here would be overridden by it)
+    if (following() && track.pos && pauseMs() === 0) map.once("moveend", () => { if (following() && !track.dragging) centerOn(track.pos.lat, track.pos.lng); });
+  });
   // "Center" = center of the part of the map the panel does not cover (bottom sheet on phones,
   // left column on wide screens); the plain container center is hidden behind the sheet on phones.
   function viewOffset() {
@@ -458,7 +479,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       track.me = L.circleMarker([lat, lng], { renderer: meR, radius: 7, color: "#fff", weight: 2.5, fillColor: "#2563eb", fillOpacity: 1, interactive: false }).addTo(meLayer);
     }
     track.me.setLatLng([lat, lng]); track.acc.setLatLng([lat, lng]).setRadius(acc || 0);
-    if (following() && Date.now() - track.lastUser > 15000) centerOn(lat, lng, { animate: true });
+    if (following() && !paused()) centerOn(lat, lng, { animate: true });
     evaluate(true);
     geoCtl.update();
   }
@@ -543,6 +564,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       },
       { enableHighAccuracy: true, maximumAge: geoRate() * 1000, timeout: 20000 });
   }
+  $("followPause").addEventListener("change", () => { try { localStorage.setItem("followPause", $("followPause").value); } catch (e) {} });
   $("autoZoom").addEventListener("change", () => { try { localStorage.setItem("autoZoom", $("autoZoom").checked ? "1" : "0"); } catch (e) {} });
   $("geoRate").addEventListener("change", () => {
     try { localStorage.setItem("geoRate", $("geoRate").value); } catch (e) {}
@@ -599,7 +621,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   };
   geoCtl.addTo(map); geoCtl.update();
   setInterval(() => { // periodic re-centering
-    if (following() && track.pos && Date.now() - track.lastUser > 15000) {
+    if (following() && track.pos && !paused()) {
       const c = map.getCenter();
       const want = centerFor(track.pos.lat, track.pos.lng);
       if (Math.abs(c.lat - want.lat) + Math.abs(c.lng - want.lng) > 1e-5) centerOn(track.pos.lat, track.pos.lng);
@@ -746,7 +768,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("fold").addEventListener("click", () => {
     const p = $("panel"); p.classList.toggle("collapsed");
     const c = p.classList.contains("collapsed"); $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
-    if (following() && track.pos && Date.now() - track.lastUser > 15000) centerOn(track.pos.lat, track.pos.lng);
+    if (following() && track.pos && !paused()) centerOn(track.pos.lat, track.pos.lng);
   });
 
   // search
@@ -974,6 +996,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     $("vor1").checked = localStorage.getItem("vor1") === "1";
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
     $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
+    const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
   } catch (e) {}
   geoCtl.update();
