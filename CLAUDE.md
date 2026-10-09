@@ -84,7 +84,7 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 - `region(i, k)`：metric・clip・k・駅ごとに結果をキャッシュする。設定が変わったら `st.cache` を作り直す。
 - **描画の重なり順（消さないこと）**：`preferCanvas` では canvas レンダラーごとに地図全体を覆う `<canvas>` ができ、クリックを受け取れるのは一番上の canvas だけ。そこで駅の点（`canvasR`）は専用の pane `stations`（z-index 450）に置き、境界線（選択駅の領域・1〜k 位の境界・全駅の境界）はすべて `lineR`（overlayPane）に描く。境界を駅と同じ pane や後から作る canvas に描くと、駅をタップしても反応しなくなる。駅以外の所のクリックは下の地図に届く。
 - 現在地の点（`meR`）は駅の点と駅名ラベル（markerPane 600）より上の pane `me`（z-index 640、`pointer-events: none`）に置く。低いと駅の点やラベルの白い縁取りに隠れ、`pointer-events: none` がないと駅のタップを奪う。精度の円は `lineR` に描く。
-- 現在地の操作は地図右上のボタン（`geoCtl`）：「現在地を使う」の切り替え（オンの間は地図が追従し、手で動かすと 15 秒止まる）と「現在地へ移動」。追従の有無は `following()`（＝位置の監視中か）で決まる。
+- 現在地の操作は地図右上の 3 つのボタン（`geoCtl`）とパネルの同じ項目（`geoUse` `geoFollow` `geoCenter`）：①現在地を使う（`geoOn()` ＝位置の監視中か）②常に中心に保つ（`geoFollow`、既定オン、localStorage に保存。手で動かすと 15 秒止まる）③いますぐ現在地を中心に。追従するのは `following()` ＝①かつ②のとき。②がオフなら、①をオンにしても地図は動かない。
 - 「最寄り駅の境界を常に描く」（`drawVor`）：表示範囲の駅の R_1(s)（1 次ボロノイ）を k と無関係に描く。中心に近い 3,000 駅まで。設定は localStorage の `vor1` に保存する。
 - フォント：BIZ UDPゴシック（Google Fonts から読み込む。Windows 10 1809 以降は端末にも入っている）。読み込めないときは Hiragino（Mac/iOS）→ メイリオ（Windows 7 以降。英名と和名の両方を指定）→ Noto Sans CJK JP（Android。古い版は Droid Sans Japanese）→ 游ゴシック → ＭＳ Ｐゴシックの順。游ゴシックは Windows で細く見えるためメイリオより後ろに置く。
 - 「1〜k 位の境界を重ねる」で二等分線がまっすぐ交差して見えるのは正しい表示。隣り合う R_j と R_{j+1} の境界は直線どうしの交点で入れ替わる（X 字に接する）ため、重ねると直線の配置そのものが見える。
