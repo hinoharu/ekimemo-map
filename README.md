@@ -20,5 +20,5 @@ npm run serve   # http://localhost:8000/ で確認
 ```
 
 ## データとライセンス
-- 駅データ：[Seo-4d696b75/station_database](https://github.com/Seo-4d696b75/station_database)（CC BY 4.0）。`data/station.csv` はそのスナップショットです。
+- 駅データ・路線データ：[Seo-4d696b75/station_database](https://github.com/Seo-4d696b75/station_database)（CC BY 4.0）。`data/station.csv` と `data/lines.json`（路線の線形を簡略化したもの）はそのスナップショットです。
 - 地図：© OpenStreetMap contributors、地理院タイル

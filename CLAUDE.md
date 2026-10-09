@@ -9,7 +9,7 @@
 全駅ぶんの R_k(s) の境界を重ねたものが k 次ボロノイ図になります。
 
 - 公開先：GitHub Pages（`dist/index.html` を Actions がデプロイ）
-- 地図：Leaflet 1.9.4（cdnjs）＋ 背景は OpenStreetMap／地理院タイル（淡色・標準）から選択、鉄道の強調に OpenRailwayMap のタイルを重ねられる（公開・非営利・小規模なら無料、出典 CC BY-SA 2.0 の表示が必要）
+- 地図：Leaflet 1.9.4（cdnjs）＋ 背景は OpenStreetMap／地理院タイル（淡色・標準）から選択。鉄道の線は station_database の線形を自前で描く（ラインカラー／1 色）か、OpenRailwayMap のタイル（公開・非営利・小規模なら無料、出典 CC BY-SA 2.0 の表示が必要）を重ねる
 - 駅データ：[station_database](https://github.com/Seo-4d696b75/station_database) の main 版 `out/main/station.csv`（CC BY 4.0、出典表示が必須）
 - ビルド時の依存：Python 3 標準ライブラリと Node.js だけ。npm パッケージは使っていません（追加する場合は相談してから）。
 
@@ -21,17 +21,18 @@
 | `src/index.template.html` | 画面・操作・Leaflet 連携。`/*CORE*/` `/*DATA*/` `/*VERSION*/` をビルドで置換 |
 | `scripts/build.py` | 上の2つと `data/station.csv` を組み立てて `dist/index.html` を作る |
 | `data/station.csv`, `data/VERSION` | 駅データのスナップショット（オフラインでも再現できるようにコミットしている） |
+| `data/lines.json` | 路線の線形（station_database の `out/main/polyline/*.json` を約 10 m の誤差で簡略化）とラインカラー。`build.py --fetch` で更新し、`dist/lines.json` として公開する（ページは鉄道の線を表示するときだけ読み込む） |
 | `tests/verify.js` | 総当たりの順位計算と照合する正しさのテスト＋速度表示 |
 | `tests/check_html.js` | ビルド結果のプレースホルダ残りと、インラインスクリプトの構文チェック |
 | `.github/workflows/pages.yml` | push 時にビルド→テスト→公開。週1回は最新データを取得して公開 |
 
-`dist/` と `build/` は生成物です。手で編集せず、コミットもしません。
+`dist/`（`index.html` と `lines.json`）と `build/` は生成物です。手で編集せず、コミットもしません。
 
 ## コマンド
 
 ```sh
 npm run build        # dist/index.html を作る（data/station.csv をそのまま使う）
-npm run build:fetch  # 最新の station.csv を取得して data/ を更新してからビルド
+npm run build:fetch  # 最新の station.csv と路線の線形を取得して data/ を更新してからビルド
 npm test             # check_html + verify（約30秒）。変更後は必ず通すこと
 npm run test:quick   # 速い版（Actions でも使用）
 npm run serve        # http://localhost:8000/ で確認（位置情報は localhost なら使える）
@@ -101,7 +102,8 @@ node tests/verify.js --quick --seed=7   # 別の乱数で追加検証
 - テスト用：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなす。駅以外をクリックしたときの順位表示はデバッグ用で、パネル下部の `dbgRank` をオンにしたときだけ出る。
 - パネルの並び：駅 → k → 表示のチェック（最寄り駅の境界・駅名を先頭に）→ 選んだ駅の情報 → 現在地と通知 → 線の見た目 → 計算の設定（距離の測り方・計算範囲）→ データとデバッグ。見出し（「たたむ」）は `position: sticky` でスクロールしても隠れない。スマホ（幅 640 px 以下、パネルは下端のシート）では最初は畳んだ状態で開く。
 - 線の見た目：境界の種類（`sel` `vor` `view` `lv`）ごとに色・太さ・濃さ・線の種類を `st.style` に持ち、localStorage の `lineStyle` に保存する。変更は `restyle` で描画済みの線に `setStyle` する（再計算しない）。1〜k 位の境界は内側ほど濃く、外側は設定の 1/3 まで薄くする。
-- 地図の見た目（パネルの「地図の見た目」と右上のレイヤー切り替えは連動）：背景の地図（`BASES`）、鉄道の強調（`rail`）、背景の薄さ・鮮やかさ（背景のタイルだけに `filter: opacity() saturate()` をかける。CSS の `opacity` は Leaflet が要素に直接書くので効かない。鉄道のレイヤーにはかけない）。localStorage の `mapLook` に保存する。
+- **鉄道の線**（`railMode`：表示しない／ラインカラー／1 色／OpenRailwayMap）：自前の線は `RailCanvas`（`DotCanvas` と同じ仕組み、pane `rail` z-index 395＝背景と塗りの上、境界線の下）の `_draw` で描く（`drawRail`）。`lines.json` は初めて表示するときに 1 回だけ読み込み、座標を正規化した Web Mercator（0〜1）に変換しておく。描画は、描く範囲にかかる区間だけ・色ごとに 1 本の path・1 px 未満の点は省く（スマホ相当の速さで全国表示でも 1 回 約 8 ms）。ラインカラーのない路線は灰色。色・太さ・濃さは localStorage の `mapLook` に保存。
+- 地図の見た目（背景の地図はパネルの「地図の見た目」と右上のレイヤー切り替えが連動）：背景の地図（`BASES`）、背景の薄さ・鮮やかさ（背景のタイルだけに `filter: opacity() saturate()` をかける。CSS の `opacity` は Leaflet が要素に直接書くので効かない。鉄道のレイヤーにはかけない）。localStorage の `mapLook` に保存する。
 - URL のハッシュ `#id=<駅id>&k=<k>&m=<metric>` で状態を再現できる。地図の位置とズームは `moveend` ごとに localStorage の `view` に保存し、再読み込み時に戻す（保存がなければ選んだ駅を表示）。
 - 最寄り駅の境界と全駅の境界は、ズームが `bndZoom`（既定 10、localStorage に保存）未満のときは描かない（縮小時の重さ対策。駅の点と駅名はこの設定に関係なく出す）。
 - **未取得駅**（パネルの「未取得駅」）：`駅名` の列がある CSV を読み込み、駅名で駅データと照合する（駅データの駅名は全駅で一意。区別の括弧付きの名前も駅メモと同じ表記）。`メモ本文` の列があれば ❌ を含む行だけを未取得とする（ユーザーのテストデータが別のツールのこの形式だったため。その形式に合わせる必要はない）。

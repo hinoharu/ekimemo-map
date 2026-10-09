@@ -229,7 +229,23 @@ details.sub[open] > summary { margin-bottom: 4px; }
         <option value="gsiStd">地理院 標準地図</option>
       </select>
     </div>
-    <label class="check"><input type="checkbox" id="railOn"> 鉄道を強調する（OpenRailwayMap を重ねる）</label>
+    <div class="field">
+      <label class="label" for="railMode">鉄道の線</label>
+      <select id="railMode">
+        <option value="off" selected>表示しない</option>
+        <option value="color">ラインカラーで描く</option>
+        <option value="mono">1 色で描く</option>
+        <option value="orm">OpenRailwayMap（駅名・橋梁なども入った画像）</option>
+      </select>
+    </div>
+    <div class="sty" id="railStyle" hidden>
+      <div class="ctl">
+        <input type="color" id="railColor" value="#0f766e" aria-label="鉄道の線の色（1 色のとき）" title="1 色で描くときの色">
+        <select id="railW" aria-label="鉄道の線の太さ"><option value="1">1 px</option><option value="1.5">1.5 px</option><option value="2" selected>2 px</option><option value="3">3 px</option><option value="4">4 px</option></select>
+        <input type="range" id="railOp" min="0.2" max="1" step="0.05" value="0.85" aria-label="鉄道の線の濃さ" title="濃さ">
+        <span class="note">色なしの路線は灰色</span>
+      </div>
+    </div>
     <div class="field">
       <div class="label"><label for="baseFade">背景の薄さ</label><output id="baseFadeOut">0%</output></div>
       <input type="range" id="baseFade" min="0" max="80" step="5" value="0">
@@ -312,7 +328,62 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     attribution: 'Data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Style: <a href="https://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA 2.0</a> <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>',
   });
   BASES.osm[1].addTo(map);
-  const layersCtl = L.control.layers(Object.fromEntries(Object.values(BASES)), { "鉄道を強調（OpenRailwayMap）": rail }, { position: "topright" }).addTo(map);
+  L.control.layers(Object.fromEntries(Object.values(BASES)), null, { position: "topright" }).addTo(map);
+
+  // ---------------- railway lines: station_database shapes drawn by us (no names, no bridge/tunnel styling)
+  // dist/lines.json is fetched only when the lines are first shown. Points are converted once to normalised
+  // Web Mercator (0..1), so a redraw is a multiply per point; only segments whose box meets the canvas are
+  // drawn, one path per colour, and points closer than ~1 px to the previous drawn one are skipped.
+  const railPane = map.createPane("rail"); railPane.style.zIndex = 395; railPane.style.pointerEvents = "none"; // above the base map and the filled areas, below the boundary lines
+  const RailCanvas = L.Canvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawRail(); } });
+  const railR = new RailCanvas({ pane: "rail", padding: 0.3 });
+  const RAIL_NO_COLOR = "#8a8f99";
+  let railData = null, railLoading = null;
+  function loadRail() {
+    if (railData) return Promise.resolve(railData);
+    if (!railLoading) railLoading = fetch("lines.json").then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }).then(j => {
+      const segs = [];
+      for (const [, , color, parts] of j.lines) for (const enc of parts) {
+        const m = enc.length / 2, mx = new Float64Array(m), my = new Float64Array(m);
+        let X = 0, Y = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (let q = 0; q < m; q++) {
+          X += enc[2 * q]; Y += enc[2 * q + 1];
+          const lng = X / 1e5, lat = Y / 1e5, sin = Math.sin(lat * DEG);
+          mx[q] = lng / 360 + 0.5; my[q] = 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI);
+          x0 = Math.min(x0, mx[q]); x1 = Math.max(x1, mx[q]); y0 = Math.min(y0, my[q]); y1 = Math.max(y1, my[q]);
+        }
+        segs.push({ color: color || RAIL_NO_COLOR, mx, my, x0, x1, y0, y1 });
+      }
+      const byColor = new Map(); for (const g of segs) { if (!byColor.has(g.color)) byColor.set(g.color, []); byColor.get(g.color).push(g); }
+      return (railData = { segs, byColor });
+    }).catch(e => { railLoading = null; throw e; });
+    return railLoading;
+  }
+  function drawRail() {
+    const ctx = railR._ctx, b = railR._bounds;
+    if (!ctx || !b || !railData) return;
+    ctx.clearRect(b.min.x, b.min.y, b.max.x - b.min.x, b.max.y - b.min.y);
+    const mode = $("railMode").value; if (mode !== "color" && mode !== "mono") return;
+    const scale = 256 * Math.pow(2, map.getZoom()), o = map.getPixelOrigin();
+    const X0 = (b.min.x + o.x) / scale, X1 = (b.max.x + o.x) / scale, Y0 = (b.min.y + o.y) / scale, Y1 = (b.max.y + o.y) / scale;
+    const groups = mode === "mono" ? [[$("railColor").value, railData.segs]] : railData.byColor;
+    ctx.lineWidth = +$("railW").value; ctx.globalAlpha = +$("railOp").value; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    for (const [color, list] of groups) {
+      ctx.beginPath();
+      for (const g of list) {
+        if (g.x1 < X0 || g.x0 > X1 || g.y1 < Y0 || g.y0 > Y1) continue;
+        const mx = g.mx, my = g.my, n = mx.length;
+        let lx = mx[0] * scale - o.x, ly = my[0] * scale - o.y; ctx.moveTo(lx, ly);
+        for (let q = 1; q < n; q++) {
+          const x = mx[q] * scale - o.x, y = my[q] * scale - o.y;
+          if (q < n - 1 && Math.abs(x - lx) + Math.abs(y - ly) < 1) continue; // sub-pixel step
+          ctx.lineTo(x, y); lx = x; ly = y;
+        }
+      }
+      ctx.strokeStyle = color; ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
   map.attributionControl.addAttribution('駅データ: <a href="https://github.com/Seo-4d696b75/station_database">station_database</a> (CC BY 4.0)');
 
   // Station dots: drawn by us on the canvas of a layer-less L.Canvas renderer (Leaflet sizes, positions and
@@ -964,28 +1035,45 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); drawVor(); });
   $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); drawVor(); });
   // ---------------- map look: base map, railway overlay, fading (kept in localStorage "mapLook")
-  const lookSave = () => { try { localStorage.setItem("mapLook", JSON.stringify({ base: $("baseMap").value, rail: $("railOn").checked, fade: +$("baseFade").value, sat: +$("baseSat").value })); } catch (e) {} };
+  const lookSave = () => { try { localStorage.setItem("mapLook", JSON.stringify({ base: $("baseMap").value, rail: $("railMode").value, railColor: $("railColor").value, railW: $("railW").value, railOp: $("railOp").value, fade: +$("baseFade").value, sat: +$("baseSat").value })); } catch (e) {} };
   function setBase(key) {
     if (!BASES[key]) return;
     for (const [k, [, layer]] of Object.entries(BASES)) if (k !== key && map.hasLayer(layer)) map.removeLayer(layer);
     if (!map.hasLayer(BASES[key][1])) BASES[key][1].addTo(map);
     $("baseMap").value = key;
   }
-  function setRail(on) { $("railOn").checked = on; if (on) rail.addTo(map); else map.removeLayer(rail); }
+  // railway lines: off / our own lines in line colours or one colour / the OpenRailwayMap image tiles
+  function setRail(mode) {
+    if (![...$("railMode").options].some(o => o.value === mode)) mode = "off";
+    $("railMode").value = mode;
+    $("railStyle").hidden = !(mode === "color" || mode === "mono");
+    if (mode === "orm") rail.addTo(map); else map.removeLayer(rail);
+    if (mode === "color" || mode === "mono") {
+      loadRail().then(() => { if (!map.hasLayer(railR)) railR.addTo(map); else drawRail(); })
+        .catch(e => toast(`路線データを読み込めませんでした（${e.message}）`));
+    } else if (map.hasLayer(railR)) map.removeLayer(railR);
+  }
   function applyFade() {
     const f = +$("baseFade").value, s = +$("baseSat").value, c = map.getContainer();
     c.style.setProperty("--base-op", String(1 - f / 100)); c.style.setProperty("--base-sat", String(s / 100));
     $("baseFadeOut").textContent = f + "%"; $("baseSatOut").textContent = s + "%";
   }
   $("baseMap").addEventListener("change", () => { setBase($("baseMap").value); lookSave(); });
-  $("railOn").addEventListener("change", () => { setRail($("railOn").checked); lookSave(); });
+  $("railMode").addEventListener("change", () => { setRail($("railMode").value); lookSave(); });
+  for (const id of ["railColor", "railW", "railOp"]) $(id).addEventListener("input", () => { drawRail(); lookSave(); });
   for (const id of ["baseFade", "baseSat"]) $(id).addEventListener("input", () => { applyFade(); lookSave(); });
   // the layers control (top right) changes the same things
   map.on("baselayerchange", (e) => { const k = Object.keys(BASES).find(k => BASES[k][1] === e.layer); if (k) { $("baseMap").value = k; lookSave(); } });
-  map.on("overlayadd overlayremove", (e) => { if (e.layer === rail) { $("railOn").checked = e.type === "overlayadd"; lookSave(); } });
   try {
     const m = JSON.parse(localStorage.getItem("mapLook") || "null");
-    if (m) { setBase(m.base); setRail(!!m.rail); if (Number.isFinite(m.fade)) $("baseFade").value = m.fade; if (Number.isFinite(m.sat)) $("baseSat").value = m.sat; }
+    if (m) {
+      setBase(m.base);
+      if (/^#[0-9a-f]{6}$/i.test(m.railColor || "")) $("railColor").value = m.railColor;
+      if (m.railW && [...$("railW").options].some(o => o.value === m.railW)) $("railW").value = m.railW;
+      if (Number.isFinite(+m.railOp) && m.railOp) $("railOp").value = m.railOp;
+      setRail(m.rail === true ? "orm" : m.rail === false ? "off" : m.rail); // true/false: the earlier on/off of OpenRailwayMap
+      if (Number.isFinite(m.fade)) $("baseFade").value = m.fade; if (Number.isFinite(m.sat)) $("baseSat").value = m.sat;
+    }
   } catch (e) {}
   applyFade();
 

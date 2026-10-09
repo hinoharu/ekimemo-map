@@ -8,5 +8,12 @@ scripts.forEach((code, i) => {
   try { new vm.Script(code, { filename: `inline-script-${i}.js` }); }
   catch (e) { console.error(`script ${i}: ${e.message}`); errors++; }
 });
+// railway lines published next to the page (fetched by it when the lines are shown)
+try {
+  const lines = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "dist", "lines.json"), "utf8")).lines;
+  if (!Array.isArray(lines) || lines.length < 100) throw new Error(`only ${lines && lines.length} lines`);
+  const bad = lines.filter(l => !Array.isArray(l[3]) || l[3].some(seg => seg.length < 4 || seg.length % 2));
+  if (bad.length) throw new Error(`${bad.length} lines with malformed segments`);
+} catch (e) { console.error(`dist/lines.json: ${e.message}`); errors++; }
 if (errors) process.exit(1);
-console.log(`dist/index.html ok (${scripts.length} inline scripts, ${(html.length / 1024).toFixed(0)} KiB)`);
+console.log(`dist/index.html ok (${scripts.length} inline scripts, ${(html.length / 1024).toFixed(0)} KiB), dist/lines.json ok`);
