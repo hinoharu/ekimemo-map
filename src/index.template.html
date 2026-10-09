@@ -57,6 +57,14 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 #nearBox .d { font-size: 10.5px; opacity: 0.85; font-variant-numeric: tabular-nums; }
 #nearBox .ua { display: inline-block; margin-left: 5px; font-size: 9.5px; padding: 0 5px; border-radius: 3px; background: var(--ua); vertical-align: 3px; }
 @media (min-width: 641px) { #nearBox { left: 380px; } }
+/* "a new version is out" bar (the service worker of a newer build took over) */
+#updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 8px; background: #1d2433; color: #fff; padding: 6px 6px 6px 14px; border-radius: 6px;
+  font-size: 13px; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); white-space: nowrap; }
+#updBar[hidden] { display: none; }
+#updBar button { font: inherit; border: none; border-radius: 4px; cursor: pointer; padding: 5px 10px; }
+#updGo { background: var(--region); color: #fff; font-weight: 700; }
+#updX { background: none; color: #fff; opacity: 0.7; padding: 5px 8px; }
 .radar { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12.5px; max-height: 260px; overflow: auto; }
 .radar li { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 6px; align-items: center; }
 .radar .no { justify-self: center; width: 17px; height: 17px; box-sizing: border-box; text-align: center; color: #fff; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 17px; }
@@ -182,6 +190,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 <div id="map" role="application" aria-label="地図"></div>
 
 <div id="nearBox" hidden aria-live="polite"></div>
+<div id="updBar" hidden role="status"><span>新しい版があります</span><button id="updGo">再読み込み</button><button id="updX" aria-label="閉じる">×</button></div>
 <section class="panel" id="panel">
   <div class="head">
     <h1>駅レーダー圏マップ</h1>
@@ -368,6 +377,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
   </div>
 
   <div class="sub">
+    <div><button class="btn" id="reloadPage">ページを再読み込み</button></div>
+    <div class="note">ホーム画面に追加（インストール）したアプリにはブラウザの再読み込みボタンがないため、ここから読み込み直せます。地図の位置と設定はそのまま戻ります。</div>
     <div class="note" id="datainfo"></div>
     <div><button class="btn" id="refresh">GitHub から最新データを取得</button></div>
     <label class="check"><input type="checkbox" id="dbgRank"> デバッグ：地図の駅以外をクリックすると、その地点のレーダー順位を表示する</label>
@@ -1665,8 +1676,21 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     try { const n = (await (await caches.open(GSI_CACHE)).keys()).length; $("offCount").textContent = `保存済みの地理院タイル：${n.toLocaleString()} 枚`; } catch (e) {}
   }
   if ("serviceWorker" in navigator && window.isSecureContext) {
-    navigator.serviceWorker.register("sw.js").then(offCount).catch((e) => { $("offCount").textContent = `オフライン対応を有効にできませんでした（${e.message}）`; });
+    // a newer build: its service worker takes over at once (skipWaiting + claim); the page on screen is still the old
+    // one, so offer a reload. No bar on the first install (no controller before). Look for updates when the app comes
+    // back to the front and every 30 minutes (an installed app may stay open for a long time).
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) $("updBar").hidden = false; });
+    navigator.serviceWorker.register("sw.js").then((reg) => {
+      offCount();
+      const check = () => { reg.update().catch(() => {}); };
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+      setInterval(check, 30 * 60 * 1000);
+    }).catch((e) => { $("offCount").textContent = `オフライン対応を有効にできませんでした（${e.message}）`; });
   } else $("offCount").textContent = "https か localhost で開いたときだけ保存できます。";
+  $("reloadPage").addEventListener("click", () => location.reload());
+  $("updGo").addEventListener("click", () => location.reload());
+  $("updX").addEventListener("click", () => { $("updBar").hidden = true; });
   $("offClear").addEventListener("click", async () => {
     if (!confirm("保存した地理院タイルを消しますか？（ページと路線データの保存は残ります）")) return;
     try { await caches.delete(GSI_CACHE); } catch (e) {}
