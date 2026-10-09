@@ -5,8 +5,8 @@
 
 ## 現在の状況（2026-10-09 時点）
 - 作業ブランチ：`claude/dazzling-johnson-pmcvrg`（マージのたびに main から作り直す）
-- **進行中**：メニューを開いたまま駅を選ぶと、エリアがメニューの裏に表示される不具合の修正（駅のタップ・一覧からの選択・検索での範囲表示を、メニューに隠れない範囲基準に。`visibleArea` / `fitVisible`）と、スマホでタップ後に駅名の吹き出しが残る件。[hinoharu/ekimemo-map#19](https://github.com/hinoharu/ekimemo-map/pull/19) を作成済み、マージの可否をユーザーに確認中。
-- 直近：[hinoharu/ekimemo-map#18](https://github.com/hinoharu/ekimemo-map/pull/18)（スマホで畳んだパネルを右下の丸いメニューボタンに）をマージ済み。
+- **進行中**：未取得駅の一覧から遠くへジャンプしたとき、前の場所の駅名などが残る不具合の修正（`StickyCanvas` と駅名の描き直し省略の判定に、地図の内部座標の原点 `getPixelOrigin()` の一致を追加）。[hinoharu/ekimemo-map#20](https://github.com/hinoharu/ekimemo-map/pull/20) を作成済み、マージの可否をユーザーに確認中。
+- 直近：[hinoharu/ekimemo-map#19](https://github.com/hinoharu/ekimemo-map/pull/19)（メニューを開いたまま駅を選んでも、メニューに隠れない所に表示。`visibleArea` / `fitVisible`）をマージ済み。
 - 直近：[hinoharu/ekimemo-map#17](https://github.com/hinoharu/ekimemo-map/pull/17)（タイルの読み込みの改善、Service Worker によるオフライン対応、地理院タイルの保存、設定が交互に消える不具合の修正）をマージ済み。公開後、ユーザーにオフラインでの動き（機内など）と、地理院タイルが実際に保存されるか（パネルの保存枚数）を見てもらう。保存枚数が増えない場合は、地理院のサーバーが CORS を返していない可能性がある。
 
 ## これまでの PR（いずれもマージ済み）
@@ -30,6 +30,7 @@
 | #16 | 小さな移動では描き直さない（`StickyCanvas`、駅名・境界の再計算の省略）、鉄道の線の濃さの見出しと % 表示（既定 100%）、CLAUDE.md の応対・運用のルールと HANDOFF.md |
 | #17 | タイルを動かしている最中から読む・画面外 4 枚分を保持、Service Worker によるオフライン対応（`src/sw.js`）、地理院タイルを見た分だけ保存（最大 3,000 枚）、再読み込みで設定が交互に消える不具合（`lookRestoring`） |
 | #18 | スマホで畳んだパネルを右下の丸いメニューボタンに（畳んだときの中心の補正はなし、開くとシートより上の中央） |
+| #19 | メニューを開いたまま駅を選んでもメニューに隠れない所に表示（タップ・一覧・検索の範囲表示）、スマホでタップ後に吹き出しが残る件 |
 
 ## 計測値の記録（ヘッドレス Chromium、スマホ 412×860、CPU 4 倍遅く）
 - 起動：約 1.95 秒（#12 時点）→ 約 1.5 秒（#13 の駅の点の自前描画）
