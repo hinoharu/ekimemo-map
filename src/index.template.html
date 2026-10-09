@@ -252,7 +252,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script>
+<script id="core-src">
 /*CORE*/
 </script>
 <script>
@@ -285,17 +285,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   L.control.layers({ "OpenStreetMap": osm, "地理院 淡色": gsi }, null, { position: "topright" }).addTo(map);
   map.attributionControl.addAttribution('駅データ: <a href="https://github.com/Seo-4d696b75/station_database">station_database</a> (CC BY 4.0)');
 
-  // Station dots get their own pane above the boundary lines. With preferCanvas, every canvas
-  // renderer is a full-map <canvas>; only the topmost one receives clicks, so the dots' canvas
-  // must be on top or tapping a station does nothing (non-hit clicks still reach the map).
-  // 610: also above the name labels (markerPane 600), so a label never hides a dot (the tap target)
-  map.createPane("stations").style.zIndex = 610;
-  const canvasR = L.canvas({ pane: "stations", padding: 0.3, tolerance: 8 }); // tolerance: easier to tap small dots
+  // Station dots: drawn by us on the canvas of a layer-less L.Canvas renderer (Leaflet sizes, positions and
+  // zoom-animates it); no Leaflet object per station. Taps are hit-tested on the map events (hitStation).
+  // Pane 610: above the boundary lines and the name labels (markerPane 600), so nothing hides a dot.
+  // Click-through: every canvas covers the whole map, and the map itself handles the events.
+  const dotPane = map.createPane("stations"); dotPane.style.zIndex = 610; dotPane.style.pointerEvents = "none";
+  // our drawing goes in _draw: Leaflet clears the canvas and calls _draw after every pan/zoom/resize
+  const DotCanvas = L.Canvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawDots(); } });
+  const dotR = new DotCanvas({ pane: "stations", padding: 0.3 });
   const lineR = L.canvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
   // current-position dot (an HTML marker, so it can animate): above the station dots and name labels
   // (markerPane 600; tooltips 650 and popups 700 stay on top), click-through so it never hides the stations from taps
   const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
-  const stationLayer = L.layerGroup().addTo(map);
   // unacquired-station areas: filled at full opacity on their own panes, the pane opacity makes
   // the union look uniform (overlaps don't get darker); click-through
   const uaPane = (name, z, op) => { const p = map.createPane(name); p.style.zIndex = z; p.style.opacity = op; p.style.pointerEvents = "none"; return L.canvas({ pane: name, padding: 0.3 }); };
@@ -306,7 +307,6 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   const levelLayer = L.layerGroup().addTo(map);
   const regionLayer = L.layerGroup().addTo(map);
   const meLayer = L.layerGroup().addTo(map);
-  let markers = [];
 
   // ---------------- data
   function loadRows(rows, version) {
@@ -318,7 +318,8 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     st.rows = $("showClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
     const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
     st.idx = makeIndex(lat, lng);
-    st.cache.clear();
+    st.cache.clear(); st.lcache.clear(); st.gen++;
+    if (worker) worker.postMessage({ type: "data", gen: st.gen, lat, lng });
     drawStations();
     drawVor();
     uaChanged(false);
@@ -334,36 +335,72 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function stationStyle(i) {
     const r = st.rows[i], ua = isUa(i), sel = i === st.sel;
     return {
-      renderer: canvasR, radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1, color: "#fff",
+      radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
       fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : (r[6] ? "#9aa0ad" : "#c2410c"),
-      fillOpacity: st.ua.size && !ua ? 0.5 : 0.95, // with a list loaded, acquired stations recede
+      fillOpacity: st.ua.size && !ua && !sel ? 0.5 : 0.95, // with a list loaded, acquired stations recede
     };
   }
   const stationTip = (i) => st.rows[i][2] + (st.rows[i][6] ? "（廃駅）" : "") + (isUa(i) ? "（未取得）" : "");
-  function drawStations() {
-    stationLayer.clearLayers(); markers = [];
-    st.rows.forEach((r, i) => {
-      const m = L.circleMarker([r[4], r[5]], stationStyle(i));
-      m.bindTooltip(stationTip(i), { direction: "top", offset: [0, -4] });
-      m.on("click", (e) => { L.DomEvent.stopPropagation(e); select(i, false); map.panTo([r[4], r[5]]); });
-      // long press (touch) / right click: toggle acquired <-> unacquired
-      m.on("contextmenu", (e) => { L.DomEvent.stopPropagation(e); L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); });
-      m.addTo(stationLayer); markers.push(m);
+  const SEL_RING = 9.5; // selected: dot r 7, ~1 px white gap, colored ring 8.5–10.5 px, white rim to 11.5 px
+  let hit = { i: new Int32Array(0), x: new Float32Array(0), y: new Float32Array(0), r: new Float32Array(0), n: 0 };
+  // Draw the dots inside the renderer's (padded) bounds, batched by style: one path per style group.
+  function drawDots() {
+    const ctx = dotR._ctx, b = dotR._bounds;
+    if (!ctx || !b || !st.rows.length) return;
+    ctx.clearRect(b.min.x, b.min.y, b.max.x - b.min.x, b.max.y - b.min.y);
+    const llb = L.latLngBounds(map.layerPointToLatLng(b.min), map.layerPointToLatLng(b.max));
+    const S = llb.getSouth(), N = llb.getNorth(), W = llb.getWest(), E = llb.getEast();
+    const groups = new Map(), n = st.rows.length;
+    const hi = new Int32Array(n), hx = new Float32Array(n), hy = new Float32Array(n), hr = new Float32Array(n);
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const r = st.rows[i];
+      if (r[4] < S || r[4] > N || r[5] < W || r[5] > E || i === st.sel) continue;
+      const p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(i), key = `${s.fillColor}|${s.fillOpacity}|${s.radius}|${s.weight}`;
+      let g = groups.get(key); if (!g) groups.set(key, g = { s, pts: [] });
+      g.pts.push(p.x, p.y);
+      hi[m] = i; hx[m] = p.x; hy[m] = p.y; hr[m] = s.radius; m++;
+    }
+    // unacquired (larger) on top of the others
+    const order = [...groups.values()].sort((a, z) => a.s.radius - z.s.radius);
+    for (const { s, pts } of order) {
+      ctx.beginPath();
+      for (let k = 0; k < pts.length; k += 2) { ctx.moveTo(pts[k] + s.radius, pts[k + 1]); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); }
+      ctx.globalAlpha = s.fillOpacity; ctx.fillStyle = s.fillColor; ctx.fill();
+      ctx.globalAlpha = 1; ctx.lineWidth = s.weight; ctx.strokeStyle = "#fff"; ctx.stroke();
+    }
+    if (st.sel >= 0 && st.rows[st.sel]) { // the selected station: dot + ring, on top
+      const r = st.rows[st.sel], p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(st.sel);
+      const circle = (rad, w, color, fill) => { ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, 2 * Math.PI); if (fill) { ctx.fillStyle = fill; ctx.globalAlpha = s.fillOpacity; ctx.fill(); ctx.globalAlpha = 1; } ctx.lineWidth = w; ctx.strokeStyle = color; ctx.stroke(); };
+      circle(SEL_RING, 4, "#fff"); circle(SEL_RING, 2, s.fillColor); circle(s.radius, s.weight, "#fff", s.fillColor);
+      hi[m] = st.sel; hx[m] = p.x; hy[m] = p.y; hr[m] = SEL_RING; m++;
+    }
+    hit = { i: hi, x: hx, y: hy, r: hr, n: m };
+  }
+  dotR.addTo(map);
+  // nearest drawn station within reach of a tap (the dot's radius + 8 px), or -1
+  function hitStation(lp) {
+    let best = -1, bd = Infinity;
+    for (let k = 0; k < hit.n; k++) {
+      const dx = hit.x[k] - lp.x, dy = hit.y[k] - lp.y, d = dx * dx + dy * dy, reach = hit.r[k] + 8;
+      if (d <= reach * reach && d < bd) { bd = d; best = hit.i[k]; }
+    }
+    return best;
+  }
+  // hover (mouse): the station name as a tooltip, pointer cursor
+  const dotTip = L.tooltip({ direction: "top", offset: [0, -6] });
+  let hoverI = -1, hoverRaf = 0, hoverLp = null;
+  map.on("mousemove", (e) => {
+    hoverLp = e.layerPoint; if (hoverRaf) return;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0; const i = hitStation(hoverLp);
+      if (i === hoverI) return; hoverI = i;
+      map.getContainer().style.cursor = i >= 0 ? "pointer" : "";
+      if (i < 0) dotTip.remove(); else dotTip.setLatLng([st.rows[i][4], st.rows[i][5]]).setContent(stationTip(i)).addTo(map);
     });
-    st.styledSel = st.sel;
-  }
-  // ring around the selected station (non-interactive, so taps still reach the dot below it)
-  const SEL_RING = 9.5; // ring centre line: colored 8.5–10.5 px, white 7.5–11.5 px; ~1 px gap to the dot (r 7)
-  let selRing = null;
-  function placeSelRing() {
-    if (selRing) { stationLayer.removeLayer(selRing[0]); stationLayer.removeLayer(selRing[1]); selRing = null; }
-    if (st.sel < 0 || !st.rows[st.sel]) return;
-    const r = st.rows[st.sel], ll = [r[4], r[5]], col = stationStyle(st.sel).fillColor;
-    selRing = [L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: "#fff", weight: 4, fill: false, interactive: false }),
-               L.circleMarker(ll, { renderer: canvasR, radius: SEL_RING, color: col, weight: 2, fill: false, interactive: false })];
-    selRing.forEach(c => c.addTo(stationLayer));
-  }
-  function restyleStation(i) { if (i >= 0 && markers[i]) { markers[i].setStyle(stationStyle(i)); markers[i].setTooltipContent(stationTip(i)); } }
+  });
+  map.on("mouseout", () => { hoverI = -1; dotTip.remove(); map.getContainer().style.cursor = ""; });
+  function drawStations() { hoverI = -1; dotTip.remove(); drawDots(); }
 
   // ---------------- line styles (per boundary kind; saved per browser)
   const STYLE_KINDS = [
@@ -396,6 +433,63 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     return R;
   }
 
+  // ---------------- background computation (Web Worker) for the drawings of many regions
+  // The worker runs the same station_core.js (the inline <script id="core-src">), so the page stays responsive
+  // while hundreds of regions are computed. A job is a list of [station, k]; results come back in chunks
+  // (~30 ms of work each) and are cached here (st.lcache: latlng only). A newer job on the same channel
+  // replaces the older one in the worker. Without Worker support the same jobs run here in small slices.
+  const WORKER_SRC = `
+    let idx = null, gen = -1, running = false; const jobs = new Map();
+    self.onmessage = (e) => { const m = e.data;
+      if (m.type === "data") { idx = makeIndex(m.lat, m.lng); gen = m.gen; jobs.clear(); return; }
+      if (m.items.length) jobs.set(m.ch, Object.assign(m, { q: 0 })); else jobs.delete(m.ch);
+      if (!running && jobs.size) { running = true; setTimeout(run, 0); }
+    };
+    function run() {
+      for (const [ch, j] of jobs) { // one chunk per channel per round, then let new messages in
+        if (j.gen !== gen) { jobs.delete(ch); continue; }
+        const out = [], t = performance.now();
+        while (j.q < j.items.length && performance.now() - t < 30) { const [i, k] = j.items[j.q++]; out.push([i, k, regionOf(idx, i, k, j.metric, j.clip).latlng]); }
+        self.postMessage({ ch, job: j.job, gen: j.gen, metric: j.metric, clip: j.clip, out });
+        if (j.q >= j.items.length) jobs.delete(ch);
+      }
+      if (jobs.size) setTimeout(run, 0); else running = false;
+    }`;
+  st.lcache = new Map(); st.gen = 0;
+  const asyncCb = new Map(); // channel -> { job, onBatch }
+  let worker = null, jobSeq = 0;
+  try {
+    worker = new Worker(URL.createObjectURL(new Blob([$("core-src").textContent + "\n" + WORKER_SRC], { type: "text/javascript" })));
+    worker.onmessage = (e) => {
+      const m = e.data; if (m.gen !== st.gen) return;
+      for (const [i, k, ll] of m.out) st.lcache.set(`${m.metric}|${m.clip}|${k}|${i}`, ll);
+      const cb = asyncCb.get(m.ch); if (cb && cb.job === m.job) cb.onBatch(m.out);
+    };
+    worker.onerror = () => { worker = null; };
+  } catch (e) { worker = null; }
+  const cachedLL = (i, k) => { const key = `${st.metric}|${st.clip}|${k}|${i}`, R = st.cache.get(key); return R ? R.latlng : st.lcache.get(key); };
+  // regions for items [[i, k], ...]: cached ones at once, the rest as they are computed; onBatch([[i, k, latlng], ...])
+  function regionsAsync(ch, items, onBatch) {
+    const job = ++jobSeq, hit = [], miss = [];
+    for (const [i, k] of items) { const ll = cachedLL(i, k); if (ll) hit.push([i, k, ll]); else miss.push([i, k]); }
+    asyncCb.set(ch, { job, onBatch });
+    if (hit.length) onBatch(hit);
+    if (worker) { worker.postMessage({ ch, job, gen: st.gen, metric: st.metric, clip: st.clip, items: miss }); return; }
+    let q = 0;
+    const step = () => {
+      const cb = asyncCb.get(ch); if (!cb || cb.job !== job) return;
+      const t = performance.now(), out = [];
+      while (q < miss.length && performance.now() - t < 24) { const [i, k] = miss[q++]; out.push([i, k, region(i, k).latlng]); }
+      if (out.length) onBatch(out);
+      if (q < miss.length) setTimeout(step, 0);
+    };
+    if (miss.length) setTimeout(step, 0);
+  }
+  function cancelAsync(ch) {
+    asyncCb.delete(ch);
+    if (worker) worker.postMessage({ ch, job: ++jobSeq, gen: st.gen, items: [] });
+  }
+
   function select(i, fly) {
     st.sel = i;
     if (i < 0) return;
@@ -407,7 +501,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   function redraw(fly) {
     regionLayer.clearLayers(); levelLayer.clearLayers();
-    const was = st.styledSel; st.styledSel = st.sel; restyleStation(was); restyleStation(st.sel); placeSelRing();
+    drawDots();
     if (st.sel < 0) return;
     const r = st.rows[st.sel];
     const t0 = performance.now();
@@ -425,7 +519,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
       `<dt>計算時間</dt><dd>${(R.ms ?? ms).toFixed(1)} ms</dd>` +
       `<dt>使った二等分線</dt><dd>${R.lines} 本</dd>` +
       `<dt>境界の頂点</dt><dd>${R.local.length} 個</dd></dl>`;
-    if ($("levels").checked) drawLevels();
+    if ($("levels").checked) drawLevels(); else { st.levelJob++; cancelAsync("lv"); }
     if ($("viewAll").checked) drawView();
     drawUaAreas();
     updateLabels();
@@ -696,25 +790,25 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const r = await Notification.requestPermission();
     toast(r === "granted" ? "端末の通知を許可しました。" : "通知は許可されませんでした。画面内の通知と振動で知らせます。");
   });
-  map.on("contextmenu", (e) => { track.lastUser = Date.now(); setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
+  map.on("contextmenu", (e) => {
+    const i = hitStation(e.layerPoint);
+    // long press (touch) / right click on a station: toggle acquired <-> unacquired; elsewhere: test position
+    if (i >= 0) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
+    track.lastUser = Date.now(); setPosition(e.latlng.lat, e.latlng.lng, 0, true);
+  });
 
   // contours R_1 ... R_k (async, cheap per level)
   function drawLevels() {
-    const job = ++st.levelJob, i = st.sel, K = st.k;
-    let j = 1;
-    const step = () => {
+    const job = ++st.levelJob, i = st.sel, K = st.k, items = [];
+    for (let j = 1; j < K; j++) items.push([i, j]);
+    regionsAsync("lv", items, (out) => {
       if (job !== st.levelJob) return;
-      const t = performance.now();
-      while (j < K && performance.now() - t < 24) {
-        const R = region(i, j);
-        const f = j / K;
-        const ls = lineStyle("lv"), pl = L.polygon(R.latlng, { renderer: lineR, ...ls, opacity: ls.opacity * lvOpacity(f), fill: false, interactive: false });
+      const ls = lineStyle("lv");
+      for (const [, j, ll] of out) {
+        const f = j / K, pl = L.polygon(ll, { renderer: lineR, ...ls, opacity: ls.opacity * lvOpacity(f), fill: false, interactive: false });
         pl.levelF = f; pl.addTo(levelLayer);
-        j++;
       }
-      if (j < K) setTimeout(step, 0);
-    };
-    step();
+    });
   }
 
   // order-k diagram for stations in view (async, capped)
@@ -754,18 +848,12 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
 
   function drawView() {
     const job = ++st.viewJob; viewLayer.clearLayers();
-    if (!$("viewAll").checked || map.getZoom() < +$("bndZoom").value) return;
+    if (!$("viewAll").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("view"); return; }
     const ids = stationsForView(st.k, 0.1);
     const CAP = 800, todo = ids.slice(0, CAP);
-    let q = 0;
-    const step = () => {
-      if (job !== st.viewJob) return;
-      const t = performance.now(), batch = [];
-      while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], st.k).latlng); q++; }
-      if (batch.length) L.polygon(batch, { renderer: lineR, ...lineStyle("view"), fill: false, interactive: false }).addTo(viewLayer);
-      if (q < todo.length) setTimeout(step, 0);
-    };
-    step();
+    regionsAsync("view", todo.map(i => [i, st.k]), (out) => {
+      if (job === st.viewJob) L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("view"), fill: false, interactive: false }).addTo(viewLayer);
+    });
     if (ids.length > CAP) toast(`表示範囲の駅が多いため、中心に近い ${CAP} 駅だけ描いています。拡大すると全部描けます。`);
   }
   map.on("moveend", () => { if ($("viewAll").checked) drawView(); });
@@ -774,22 +862,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   // ~0.5 ms per station and cached, so panning around is cheap after the first pass.
   function drawVor() {
     const job = ++st.vorJob; vorLayer.clearLayers();
-    if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) return;
+    if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("vor"); return; }
     const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
-    let q = 0;
-    const step = () => {
-      if (job !== st.vorJob) return;
-      const t = performance.now(), batch = [];
-      while (q < todo.length && performance.now() - t < 24) { batch.push(region(todo[q], 1).latlng); q++; }
-      if (batch.length) L.polygon(batch, { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
-      if (q < todo.length) setTimeout(step, 0);
-    };
-    step();
+    regionsAsync("vor", todo.map(i => [i, 1]), (out) => {
+      if (job === st.vorJob) L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
+    });
   }
   map.on("moveend", () => { if ($("vor1").checked) drawVor(); });
 
   // ---------------- ranking at a clicked point
   map.on("click", (e) => {
+    const hitI = hitStation(e.layerPoint);
+    if (hitI >= 0) { select(hitI, false); map.panTo([st.rows[hitI][4], st.rows[hitI][5]]); return; } // tap on a station
     if (!$("dbgRank").checked) return; // debug tool, off by default
     const { lat, lng } = e.latlng, n = st.rows.length;
     const K = Math.max(st.k, 5), top = [];
@@ -860,13 +944,18 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     drawVor();
   });
   $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
-  $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; viewLayer.clearLayers(); } });
+  $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; cancelAsync("view"); viewLayer.clearLayers(); } });
   $("showClosed").addEventListener("change", () => applyFilter(true));
+  function setFolded(c) {
+    $("panel").classList.toggle("collapsed", c);
+    $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+  }
   $("fold").addEventListener("click", () => {
-    const p = $("panel"); p.classList.toggle("collapsed");
-    const c = p.classList.contains("collapsed"); $("fold").textContent = c ? "ひらく" : "たたむ"; $("fold").setAttribute("aria-expanded", String(!c));
+    setFolded(!$("panel").classList.contains("collapsed"));
     if (following() && track.pos && !paused()) centerOn(track.pos.lat, track.pos.lng);
   });
+  // phones: the panel is a bottom sheet over half the map, so it starts folded (wide screens: open)
+  if (window.matchMedia("(max-width: 640px)").matches) setFolded(true);
 
   // search
   const kataToHira = (s) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
@@ -952,9 +1041,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     if (was) st.ua.delete(name); else st.ua.set(name, nowStamp());
     saveUa();
     toast(was ? `${name} を取得済みにしました（もう一度長押しで戻せます）` : `${name} を未取得にしました`);
-    const first = st.ua.size === (was ? 0 : 1); // acquired stations fade only while a list exists
-    if (first) markers.forEach((m, j) => m.setStyle(stationStyle(j)));
-    restyleStation(i);
+    drawDots();
     if (i === st.sel) { redraw(false); uaChanged(false); } else uaChanged(true); // redraw() redraws the areas
   }
   // after the set changed: labels, areas, list, radar baseline (no notification for our own edit)
@@ -992,23 +1079,13 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function drawUaAreas() {
     const job = ++st.uaJob; uaLayer1.clearLayers(); uaLayerK.clearLayers();
     const want1 = $("uaArea1").checked, wantK = $("uaAreaK").checked;
+    if (!want1) cancelAsync("ua1"); if (!wantK) cancelAsync("uaK");
     if (!st.ua.size || !(want1 || wantK)) return;
     const ids = []; st.rows.forEach((r, i) => { if (st.ua.has(r[2])) ids.push(i); });
     const style = { fillColor: "#d1267a", fillOpacity: 1, stroke: false, fillRule: "nonzero", interactive: false };
-    let q = 0;
-    const step = () => {
-      if (job !== st.uaJob) return;
-      const t = performance.now(), b1 = [], bK = [];
-      while (q < ids.length && performance.now() - t < 24) {
-        if (want1) b1.push(region(ids[q], 1).latlng);
-        if (wantK) bK.push(region(ids[q], st.k).latlng);
-        q++;
-      }
-      if (b1.length) L.polygon(b1, { ...style, renderer: uaR1 }).addTo(uaLayer1);
-      if (bK.length) L.polygon(bK, { ...style, renderer: uaRK }).addTo(uaLayerK);
-      if (q < ids.length) setTimeout(step, 0);
-    };
-    step();
+    const add = (layer, renderer) => (out) => { if (job === st.uaJob) L.polygon(out.map(o => o[2]), { ...style, renderer }).addTo(layer); };
+    if (want1) regionsAsync("ua1", ids.map(i => [i, 1]), add(uaLayer1, uaR1));
+    if (wantK) regionsAsync("uaK", ids.map(i => [i, st.k]), add(uaLayerK, uaRK));
   }
   $("uaArea1").addEventListener("change", drawUaAreas);
   $("uaAreaK").addEventListener("change", drawUaAreas);
