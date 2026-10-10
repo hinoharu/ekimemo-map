@@ -40,7 +40,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
    (= designated position / toggle) must not start a text selection over the whole page or open the callout.
    Only the map and what floats on it; not the panel (its search box must stay editable) */
 @supports (-webkit-touch-callout: none) {
-  #map, #nearBox, #updBar, #toast, .menu-fab { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #map, #nearBox, #updBar, #toast, #grpBar, .menu-fab { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 }
 .panel {
   position: fixed; z-index: 1000; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
@@ -87,17 +87,20 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 #nearBox .cl { background: #626878; }
 @media (min-width: 641px) { body:not(.folded) #nearBox { left: 380px; } } /* right of the open panel */
 /* "a new version is out" bar (the service worker of a newer build took over) */
-#toast { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+#toast { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(40px + var(--gb, 0px) + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 10px; background: #1d2433; color: #fff; padding: 8px 14px; border-radius: 4px; font-size: 13px;
   width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); }
 #toast[hidden] { display: none; }
 #toast button { font: inherit; font-weight: 700; border: none; border-radius: 4px; background: #fff; color: #1d2433; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
-/* the group's stations have no area in common (multi-station mode): stays while that holds; hidden under a toast */
-#grpNone { position: fixed; z-index: 1050; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom, 0px));
-  background: rgba(124, 58, 237, 0.9); color: #fff; padding: 6px 14px; border-radius: 4px; font-size: 13px; pointer-events: none;
-  width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; box-shadow: 0 2px 10px rgba(20, 24, 34, 0.25); }
-#grpNone[hidden], body.toasting #grpNone { display: none; }
-#updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+/* multi-station mode: the group's stations as purple pills at the bottom of the map, with the overlap's area */
+#grpBar { position: fixed; z-index: 1040; left: 8px; bottom: calc(40px + env(safe-area-inset-bottom, 0px)); max-width: calc(100% - 76px);
+  box-sizing: border-box; display: grid; gap: 4px; padding: 6px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 12px rgba(20, 24, 34, 0.22); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+#grpBar[hidden] { display: none; }
+#grpBar .gi { font-size: 12px; color: #4c1d95; }
+#grpBar .gi.none { color: #fff; background: rgba(124, 58, 237, 0.9); border-radius: 4px; padding: 3px 8px; justify-self: start; }
+@media (min-width: 641px) { body:not(.folded) #grpBar { left: 352px; max-width: calc(100% - 420px); } } /* right of the open panel */
+#updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + var(--gb, 0px) + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 8px; background: #1d2433; color: #fff; padding: 6px 6px 6px 14px; border-radius: 6px;
   font-size: 13px; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); white-space: nowrap; }
 #updBar[hidden] { display: none; }
@@ -266,7 +269,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
 <div id="map" role="application" aria-label="地図"></div>
 
 <div id="nearBox" hidden aria-live="polite"></div>
-<div id="grpNone" hidden role="status"></div>
+<div id="grpBar" hidden role="status"><div class="chips" id="grpList"></div><div class="gi" id="grpInfo"></div></div>
+<input type="checkbox" id="grpMode" hidden aria-hidden="true">
 <div id="updBar" hidden role="status"><span>新しい版があります</span><button id="updGo">再読み込み</button><button id="updX" aria-label="閉じる">×</button></div>
 <section class="panel" id="panel">
   <div class="head">
@@ -321,15 +325,6 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <label class="check"><input type="checkbox" id="autoZoom"> オートズームを許可する</label>
   </details>
 
-  <details class="sec" data-sec="grp" id="grpSec">
-    <summary>複数駅の重なり</summary>
-    <div class="note">全部の駅がレーダーに入る地域を表示します（整理は保留中）。</div>
-    <label class="check"><input type="checkbox" id="grpMode"> 複数選択モード：地図の駅をタップしてグループに追加・削除（地図の <b>⧉</b> ボタンでも切り替え）</label>
-    <div class="chips" id="grpList"></div>
-    <div class="note" id="grpInfo"></div>
-    <div class="row"><button class="btn" id="grpClear">グループを空にする</button></div>
-    <label class="check"><input type="checkbox" id="nGrp" checked> 現在地・指定位置が重なりの地域に出入りしたら通知</label>
-  </details>
 
   <details class="sec" data-sec="notif">
     <summary>通知</summary>
@@ -1143,7 +1138,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const { lat, lng, acc, simulated } = track.pos;
     const R = rankAt(lat, lng), near = R.top[0], set = new Set(R.top);
     const inSel = st.sel >= 0 && R.selRank <= st.k;
-    const gOn = $("grpMode").checked, grpKey = gOn ? grp.ids.join(",") : "", inGrp = gOn && grp.ids.length >= 2 && R.gRank.length === grp.ids.length && R.gRank.every(q => q <= st.k);
+    const gOn = $("grpMode").checked, grpKey = gOn ? grp.ids.join(",") : "", inGrp = gOn && grp.ids.length >= 1 && R.gRank.length === grp.ids.length && R.gRank.every(q => q <= st.k);
     const uaIn = R.top.filter(isUa), uaSet = new Set(uaIn);
     const P = track.prev;
     if (notifyChanges && P) {
@@ -1158,9 +1153,11 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
         if (inn.length) notify(`未取得駅がレーダーに入りました：${inn.map(nm).join("・")}` + (inn.includes(near) ? `（${nm(near)} は最寄り＝位置登録で取れます）` : ""));
         else if (P.near !== near && isUa(near)) notify(`最寄り駅 ${nm(near)} は未取得です（位置登録で取れます）`);
       }
-      if ($("nGrp").checked && gOn && grp.ids.length >= 2 && P.grpKey === grpKey && P.inGrp !== inGrp)
-        notify(inGrp ? `重なりの地域に入りました（${grp.ids.length} 駅すべてがレーダー圏内）` : `重なりの地域から出ました`);
-      if ($("nSel").checked && st.sel >= 0 && P.sel === st.sel && P.inSel !== inSel)
+      // 選択駅のエリア: in the multi-station mode the group's common area counts as one virtual target (user)
+      const gName = grp.ids.length === 1 ? `${nm(grpAll()[0] ?? 0)} のエリア` : `${grp.ids.length} 駅に共通するエリア`;
+      if ($("nSel").checked && gOn && grp.ids.length >= 1 && P.grpKey === grpKey && P.inGrp !== inGrp)
+        notify(inGrp ? `${gName}に入りました` : `${gName}から出ました`);
+      if ($("nSel").checked && !gOn && st.sel >= 0 && P.sel === st.sel && P.inSel !== inSel)
         notify(inSel ? `${nm(st.sel)} の圏内に入りました（${R.selRank} 位）` : `${nm(st.sel)} の圏外に出ました（${R.selRank} 位）`);
     }
     track.prev = { near, set, inSel, sel: st.sel, uaSet, inGrp, grpKey };
@@ -1453,15 +1450,16 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   function drawGroup() {
     const all = grpAll(), gi = grpIdx(), polys = gi.map(i => region(i, st.k).latlng);
     grp.area = groupArea(polys);
-    $("grpList").innerHTML = all.map(i => `<button class="chip" data-id="${st.rows[i][0]}" title="グループから外す">${esc(st.rows[i][2])} ×</button>`).join("");
-    $("grpInfo").textContent = !all.length ? "グループは空です。複数選択モードで地図の駅をタップすると追加できます。"
-      : !gi.length ? `グループ ${all.length} 駅。複数選択モードの間だけ地図に表示します。`
-      : gi.length === 1 ? `${st.rows[gi[0]][2]} が ${st.k} 位以内に入る地域：${fmtArea(grp.area)} km²。もう 1 駅以上追加すると、重なる地域を表示します。`
-      : grp.area > 0 ? `${gi.length} 駅すべてが ${st.k} 位以内に入る地域：${grp.area < 0.1 ? "0.1 km² 未満" : `約 ${fmtArea(grp.area)} km²`}（画素から求めた近似値）`
-      : `${gi.length} 駅すべてが ${st.k} 位以内に入る地域はありません。`;
-    $("grpClear").disabled = !all.length;
-    const none = gi.length > 1 && !(grp.area > 0); // shown at the bottom all along (user: easy to miss on the map)
-    $("grpNone").hidden = !none; if (none) $("grpNone").textContent = `選択中の ${gi.length} 駅に共通するエリアがありません`;
+    // the bar at the bottom of the map: only in the mode, with stations in the group (user's idea; the panel section
+    // was dropped). The "no common area" line stays there all along (easy to miss on the map)
+    const bar = $("grpBar"), none = gi.length > 1 && !(grp.area > 0);
+    bar.hidden = !gi.length;
+    $("grpList").innerHTML = gi.map(i => `<button class="chip" data-id="${st.rows[i][0]}" title="グループから外す">${esc(st.rows[i][2])} ×</button>`).join("");
+    $("grpInfo").className = "gi" + (none ? " none" : "");
+    $("grpInfo").textContent = !gi.length ? "" : none ? `選択中の ${gi.length} 駅に共通するエリアがありません`
+      : gi.length === 1 ? `レーダーに入るエリア ${fmtArea(grp.area)} km²（もう 1 駅追加すると共通するエリアを表示）`
+      : `共通するエリア ${grp.area < 0.1 ? "0.1 km² 未満" : `約 ${fmtArea(grp.area)} km²`}`;
+    document.body.style.setProperty("--gb", bar.hidden ? "0px" : bar.offsetHeight + 8 + "px"); // toasts go above it
     if (gi.length && !map.hasLayer(grp.r)) grp.r.addTo(map);       // its _draw draws it
     else if (!gi.length && map.hasLayer(grp.r)) map.removeLayer(grp.r);
     else if (gi.length) drawGroupCanvas();
@@ -1481,7 +1479,6 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const b = e.target.closest(".chip"); if (!b) return;
     const i = st.rows.findIndex(r => r[0] === +b.dataset.id); if (i >= 0) toggleGroup(i);
   });
-  $("grpClear").addEventListener("click", () => { grp.ids = []; saveGroup(); drawDots(); updateLabels(); drawGroup(); });
   // map button: multi-station mode on / off (the panel is often out of reach in split screen)
   const ICON_MULTI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="10" r="6"/><circle cx="15" cy="10" r="6"/><circle cx="12" cy="15" r="6"/><path d="M12 10.6a6 6 0 0 1 0 .01" stroke-width="3" stroke-linecap="round"/></svg>';
   multiCtl.onAdd = () => {
@@ -1506,11 +1503,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     toast(on ? "複数選択モード：駅をタップするとグループに追加・削除します" : "複数選択モードを終えました（グループは残ります）");
   }
   $("grpMode").addEventListener("change", () => setGroupMode($("grpMode").checked));
-  $("nGrp").addEventListener("change", () => { try { localStorage.setItem("nGrp", $("nGrp").checked ? "1" : "0"); } catch (e) {} });
   multiCtl.addTo(map); multiCtl.update();
   try {
     const g = JSON.parse(localStorage.getItem("group") || "[]"); if (Array.isArray(g)) grp.ids = g.filter(Number.isFinite).slice(0, GRP_MAX);
-    if (localStorage.getItem("nGrp") === "0") $("nGrp").checked = false;
     if (localStorage.getItem("grpMode") === "1") { $("grpMode").checked = true; multiCtl.update(); }
   } catch (e) {}
   setInterval(() => { // periodic re-centering
@@ -1651,11 +1646,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     el.textContent = msg;
     if (action) {
       const b = document.createElement("button"); b.textContent = action[0];
-      b.addEventListener("click", () => { el.hidden = true; document.body.classList.remove("toasting"); clearTimeout(toastTimer); action[1](); });
+      b.addEventListener("click", () => { el.hidden = true; clearTimeout(toastTimer); action[1](); });
       el.appendChild(b);
     }
-    el.hidden = false; document.body.classList.add("toasting"); // hides #grpNone at the same spot
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; document.body.classList.remove("toasting"); }, ms || 4000);
+    el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms || 4000);
   }
 
   // ---------------- controls
