@@ -590,10 +590,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     drawVor();
     uaChanged(false);
     $("datainfo").textContent = `駅データ main 版 ${fmtVer(st.version)}・${st.rows.length.toLocaleString()} 駅`;
+    // no default station (it used to be 東京; the installed app always opens without #id): nothing selected
     let sel = -1;
     if (keepSel && prevId != null) sel = st.rows.findIndex(r => r[0] === prevId);
-    if (sel < 0) sel = st.rows.findIndex(r => r[2] === "東京");
-    select(sel, !keepSel);
+    if (sel >= 0) select(sel, !keepSel); else { st.sel = -1; redraw(false); }
   }
   const fmtVer = (v) => /^\d{8}$/.test(v) ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6)}` : v;
 
@@ -1394,13 +1394,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   function setGroupMode(on) {
     $("grpMode").checked = on;
     try { localStorage.setItem("grpMode", on ? "1" : "0"); } catch (e) {}
-    // entering with a station selected: it becomes (stays) a member (user's wish)
-    let added = "";
-    if (on && st.sel >= 0 && st.rows[st.sel] && !grp.ids.includes(st.rows[st.sel][0]) && grp.ids.length < GRP_MAX) {
-      grp.ids.push(st.rows[st.sel][0]); saveGroup(); added = `（${st.rows[st.sel][2]} を追加）`;
-    }
+    // the selected station is NOT added (it may be off screen and go unnoticed; the user changed their mind)
     drawDots(); updateLabels(); drawGroup();
-    toast(on ? `複数選択モード：駅をタップするとグループに追加・削除します${added}` : "複数選択モードを終えました（グループは残ります）");
+    toast(on ? "複数選択モード：駅をタップするとグループに追加・削除します" : "複数選択モードを終えました（グループは残ります）");
   }
   $("grpMode").addEventListener("change", () => setGroupMode($("grpMode").checked));
   $("nGrp").addEventListener("change", () => { try { localStorage.setItem("nGrp", $("nGrp").checked ? "1" : "0"); } catch (e) {} });
