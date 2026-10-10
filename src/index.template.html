@@ -1311,7 +1311,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     ctx.save(); ctx.globalAlpha = 0.45; ctx.lineWidth = 1; ctx.strokeStyle = GRP_COLOR; ctx.setLineDash([4, 4]);
     for (const P of pts) { path(ctx, P); ctx.stroke(); }
     ctx.restore();
-    if (pts.length < 2 || !(grp.area > 0)) return; // nothing in common: no fill, no outline
+    if (!(grp.area > 0)) return; // nothing in common: no fill, no outline (one member: its own region, as when selected)
     const W = ctx.canvas.width, H = ctx.canvas.height;
     if (!grpOff) grpOff = document.createElement("canvas");
     if (grpOff.width !== W || grpOff.height !== H) { grpOff.width = W; grpOff.height = H; }
@@ -1331,7 +1331,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   // approximate area (km²) of the overlap: rasterise it over the intersection of the members' boxes
   function groupArea(polys) {
-    if (polys.length < 2) return null;
+    if (!polys.length) return null;
+    if (polys.length === 1) return sphericalArea(polys[0]); // one member: the exact area, as for a selected station
     let s = -90, n = 90, w = -180, e = 180;
     for (const ll of polys) { let a = 90, b = -90, c = 180, d = -180; for (const [la, lo] of ll) { a = Math.min(a, la); b = Math.max(b, la); c = Math.min(c, lo); d = Math.max(d, lo); } s = Math.max(s, a); n = Math.min(n, b); w = Math.max(w, c); e = Math.min(e, d); }
     if (s >= n || w >= e) return 0;
@@ -1351,7 +1352,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     $("grpList").innerHTML = all.map(i => `<button class="chip" data-id="${st.rows[i][0]}" title="グループから外す">${esc(st.rows[i][2])} ×</button>`).join("");
     $("grpInfo").textContent = !all.length ? "グループは空です。複数選択モードで地図の駅をタップすると追加できます。"
       : !gi.length ? `グループ ${all.length} 駅。複数選択モードの間だけ地図に表示します。`
-      : gi.length === 1 ? "もう 1 駅以上追加すると、重なる地域を表示します。"
+      : gi.length === 1 ? `${st.rows[gi[0]][2]} が ${st.k} 位以内に入る地域：${fmtArea(grp.area)} km²。もう 1 駅以上追加すると、重なる地域を表示します。`
       : grp.area > 0 ? `${gi.length} 駅すべてが ${st.k} 位以内に入る地域：${grp.area < 0.1 ? "0.1 km² 未満" : `約 ${fmtArea(grp.area)} km²`}（画素から求めた近似値）`
       : `${gi.length} 駅すべてが ${st.k} 位以内に入る地域はありません。`;
     $("grpClear").disabled = !all.length;
