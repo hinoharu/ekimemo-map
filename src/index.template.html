@@ -150,6 +150,9 @@ body.compact #grpBar, body.compact #selBar { left: 46px; max-width: calc(100% - 
   body.compact .leaflet-control-attribution { font-size: 8.5px; line-height: 1.25; padding: 0 4px; }
   body.compact #nearBox { top: calc(6px + env(safe-area-inset-top, 0px)); left: 6px; padding: 3px 9px; border-radius: 8px; }
   body.compact #nearBox .hd { display: flex; align-items: baseline; gap: 6px; }
+  body.compact #nearBox .hd > * { white-space: nowrap; flex: none; } /* one line: no wrapping inside "0.63 km" etc. */
+  body.compact #nearBox { max-width: calc(100vw - 64px); } /* up to the right-hand buttons */
+  body.compact #nearBox .hd > .n { flex: 0 1 auto; min-width: 0; } /* a long name gives way (ellipsis), not the age */
   body.compact #nearBox ol { max-height: calc(100vh - 80px); }
   body.compact #nearBox li { font-size: 11.5px; line-height: 1.25; }
   body.compact #nearBox[hidden] { display: none; }
@@ -280,6 +283,10 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .me-dot .ring { position: absolute; inset: 0; border-radius: 50%; background: rgba(37, 99, 235, 0.45); opacity: 0; }
 .me-dot.ping .ring { animation: me-ping 1.1s ease-out; }
 .me-dot.off .core { background: #8a93a6; }
+/* "3 分前の位置" just below-right of the marker, in its grey (user) */
+.me-dot .age { position: absolute; left: 15px; top: 13px; font-size: 11px; font-weight: 700; color: #8a93a6; white-space: nowrap;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff; pointer-events: none; }
+.me-dot .age:empty { display: none; }
 @keyframes me-ping { from { transform: scale(1); opacity: 0.8; } to { transform: scale(3.6); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .me-dot.ping .ring { animation: none; } }
 /* location buttons on the map (Leaflet control, under the zoom buttons) */
@@ -1191,7 +1198,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (!track.me) {
       track.acc = L.circle([lat, lng], { renderer: lineR, radius: acc || 0, color: "#2563eb", weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false }).addTo(meLayer);
       track.me = L.marker([lat, lng], { pane: "me", interactive: false, keyboard: false,
-        icon: L.divIcon({ className: "me-wrap", html: '<div class="me-dot"><span class="ring"></span><span class="core"></span></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(meLayer);
+        icon: L.divIcon({ className: "me-wrap", html: '<div class="me-dot"><span class="ring"></span><span class="core"></span><span class="age"></span></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(meLayer);
     }
     track.me.setLatLng([lat, lng]); track.acc.setLatLng([lat, lng]).setRadius(acc || 0);
     meDotState();
@@ -1267,7 +1274,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (!$("nearOn").checked || near == null) { box.hidden = true; return; }
     const r = st.rows[near];
     box.firstChild.innerHTML = `<div class="k">${simulated ? "指定位置の" : ""}最寄り駅</div>${r[3] ? `<div class="y">${esc(r[3])}</div>` : ""}<div class="n"><span class="nm">${esc(r[2])}</span>${isUa(near) || r[6] ? `<span class="bd">${isUa(near) ? '<span class="ua">未取得</span>' : ""}${r[6] ? '<span class="cl">廃止</span>' : ""}</span>` : ""}</div><div class="d">${km(lat, lng, r[4], r[5])}</div>`;
-    box.hidden = false; fillNearList(lat, lng);
+    box.hidden = false; fillNearList(lat, lng); meDotState();
   }
 
   function notify(msg) {
@@ -1287,7 +1294,17 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const d = meDot(); if (!d) return;
     d.classList.remove("ping"); void d.offsetWidth; d.classList.add("ping");
   }
-  function meDotState() { const d = meDot(); if (d) d.classList.toggle("off", !geoOn() && !track.pos.simulated); }
+  // an old location: no fix for STALE_MS while using it → the marker turns grey (as when the location is off) and the
+  // marker says how old it is, just below-right of it (user). A designated position is the user's own choice: never "old"
+  const STALE_MS = 60000;
+  const posAge = () => track.pos && !track.pos.simulated && track.lastSeen ? Date.now() - track.lastSeen : 0;
+  const fmtAge = (ms) => ms < 3600000 ? `${Math.floor(ms / 60000)} 分前の位置` : `${Math.floor(ms / 3600000)} 時間前の位置`;
+  function meDotState() {
+    const d = meDot(), age = posAge(), real = track.pos && !track.pos.simulated;
+    if (d) d.classList.toggle("off", !!real && (!geoOn() || age >= STALE_MS));
+    const a = d && d.querySelector(".age"); if (a) a.textContent = real && age >= STALE_MS ? fmtAge(age) : "";
+  }
+  setInterval(() => { if (track.pos) meDotState(); }, 10000);
   // geoOn: watching the location. following: also keep it centered (paused for 15 s after a drag).
   const geoOn = () => track.watch !== null;
   const following = () => geoOn() && $("geoFollow").checked;
@@ -1296,6 +1313,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   function onFix(p, quick) {
     const now = Date.now(); track.lastErr = null; // a fix: a later problem is shown again
     if (quick && track.precise) return; // the quick coarse fix arrived after a precise one
+    track.lastSeen = now; // any fresh fix, also one skipped below by the update interval (the location is alive)
     if (!quick && track.precise && now - track.lastFix < geoRate() * 1000 - 200) return;
     const first = !track.precise && !track.lastFix && following();
     track.lastFix = now; if (!quick) track.precise = true;
