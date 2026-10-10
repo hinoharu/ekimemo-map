@@ -75,6 +75,11 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); }
 #toast[hidden] { display: none; }
 #toast button { font: inherit; font-weight: 700; border: none; border-radius: 4px; background: #fff; color: #1d2433; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+/* the group's stations have no area in common (multi-station mode): stays while that holds; hidden under a toast */
+#grpNone { position: fixed; z-index: 1050; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  background: rgba(124, 58, 237, 0.9); color: #fff; padding: 6px 14px; border-radius: 4px; font-size: 13px; pointer-events: none;
+  width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; box-shadow: 0 2px 10px rgba(20, 24, 34, 0.25); }
+#grpNone[hidden], body.toasting #grpNone { display: none; }
 #updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 8px; background: #1d2433; color: #fff; padding: 6px 6px 6px 14px; border-radius: 6px;
   font-size: 13px; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); white-space: nowrap; }
@@ -218,6 +223,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 <div id="map" role="application" aria-label="地図"></div>
 
 <div id="nearBox" hidden aria-live="polite"></div>
+<div id="grpNone" hidden role="status"></div>
 <div id="updBar" hidden role="status"><span>新しい版があります</span><button id="updGo">再読み込み</button><button id="updX" aria-label="閉じる">×</button></div>
 <section class="panel" id="panel">
   <div class="head">
@@ -1359,6 +1365,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       : grp.area > 0 ? `${gi.length} 駅すべてが ${st.k} 位以内に入る地域：${grp.area < 0.1 ? "0.1 km² 未満" : `約 ${fmtArea(grp.area)} km²`}（画素から求めた近似値）`
       : `${gi.length} 駅すべてが ${st.k} 位以内に入る地域はありません。`;
     $("grpClear").disabled = !all.length;
+    const none = gi.length > 1 && !(grp.area > 0); // shown at the bottom all along (user: easy to miss on the map)
+    $("grpNone").hidden = !none; if (none) $("grpNone").textContent = `選択中の ${gi.length} 駅に共通するエリアがありません`;
     if (gi.length && !map.hasLayer(grp.r)) grp.r.addTo(map);       // its _draw draws it
     else if (!gi.length && map.hasLayer(grp.r)) map.removeLayer(grp.r);
     else if (gi.length) drawGroupCanvas();
@@ -1568,10 +1576,11 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     el.textContent = msg;
     if (action) {
       const b = document.createElement("button"); b.textContent = action[0];
-      b.addEventListener("click", () => { el.hidden = true; clearTimeout(toastTimer); action[1](); });
+      b.addEventListener("click", () => { el.hidden = true; document.body.classList.remove("toasting"); clearTimeout(toastTimer); action[1](); });
       el.appendChild(b);
     }
-    el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms || 4000);
+    el.hidden = false; document.body.classList.add("toasting"); // hides #grpNone at the same spot
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; document.body.classList.remove("toasting"); }, ms || 4000);
   }
 
   // ---------------- controls
