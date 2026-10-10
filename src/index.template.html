@@ -112,6 +112,15 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 .panel.collapsed #fold { width: 48px; height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--ink); }
 .panel.collapsed #fold .fold-ico { display: block; }
 .panel.collapsed #fold .fold-txt { display: none; }
+/* wide screens (tablets, PCs): the round menu button stays at the bottom right while the panel is open too, and
+   closes it again (the panel opens in the left column; the map's buttons are on the right) */
+.menu-fab { display: none; }
+@media (min-width: 641px) {
+  .menu-fab { display: flex; position: fixed; z-index: 1001; right: 10px; bottom: calc(34px + env(safe-area-inset-bottom, 0px));
+    width: 50px; height: 50px; align-items: center; justify-content: center; border-radius: 50%; cursor: pointer;
+    background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 6px 24px rgba(29, 36, 51, 0.16); color: var(--ink); padding: 0; }
+  .panel.collapsed { display: none; }
+}
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   /* stays visible while the panel scrolls (top = -panel padding) */
   position: sticky; top: -14px; z-index: 6; background: var(--paper); margin: -14px -16px 0; padding: 14px 16px 6px; }
@@ -123,7 +132,7 @@ h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: 0.04em; }
 input[type=text], input[type=number], select {
   font: inherit; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 7px 9px; width: 100%; box-sizing: border-box;
 }
-input[type=range] { width: 100%; accent-color: var(--region); }
+input[type=range] { width: 100%; accent-color: var(--region); touch-action: none; } /* drags are handled in script (iOS) */
 .krow { display: grid; grid-template-columns: 1fr 64px; gap: 8px; align-items: center; }
 .search { position: relative; }
 .sugg { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; background: #fff; border: 1px solid var(--rule); border-top: none; border-radius: 0 0 4px 4px; max-height: 260px; overflow: auto; }
@@ -393,6 +402,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <div class="note">指定位置：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
   </div>
 </section>
+<button id="menuFab" class="menu-fab" aria-expanded="true" aria-label="メニューをたたむ"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script id="core-src">
@@ -1450,15 +1460,39 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   function setFolded(c) {
     $("panel").classList.toggle("collapsed", c); document.body.classList.toggle("folded", c);
     $("fold").querySelector(".fold-txt").textContent = c ? "ひらく" : "たたむ";
-    $("fold").setAttribute("aria-expanded", String(!c)); $("fold").setAttribute("aria-label", c ? "メニューをひらく" : "メニューをたたむ");
+    for (const b of [$("fold"), $("menuFab")]) { b.setAttribute("aria-expanded", String(!c)); b.setAttribute("aria-label", c ? "メニューをひらく" : "メニューをたたむ"); }
     if (!c && st.ua.size) renderUaList(); // the list is not kept up to date while folded
   }
   const wideMq = window.matchMedia("(min-width: 641px)");
-  $("fold").addEventListener("click", () => {
+  const toggleFold = () => {
     setFolded(!$("panel").classList.contains("collapsed"));
     if (wideMq.matches) try { localStorage.setItem("panelFolded", $("panel").classList.contains("collapsed") ? "1" : "0"); } catch (e) {}
     if (following() && track.pos && !paused()) centerOn(track.pos.lat, track.pos.lng);
-  });
+  };
+  $("fold").addEventListener("click", toggleFold);
+  $("menuFab").addEventListener("click", toggleFold);
+  // Sliders on touch screens: in the scrolling panel, iOS (WebKit, Chrome on iPad too) tends to take a drag on a
+  // slider's thumb as a scroll of the panel (it bounces, the value does not change; a tap works). Handle the touch
+  // here: the finger's x sets the value, and the move is not passed on to scrolling.
+  function rangeFromTouch(r, x) {
+    const b = r.getBoundingClientRect(), min = +r.min || 0, max = r.max === "" ? 100 : +r.max, step = +r.step || 1;
+    const f = Math.min(1, Math.max(0, (x - b.left) / b.width));
+    const v = Math.min(max, Math.max(min, min + Math.round(f * (max - min) / step) * step));
+    if (Math.abs(+r.value - v) > step / 2) { r.value = String(+v.toFixed(6)); r.dispatchEvent(new Event("input", { bubbles: true })); return true; }
+    return false;
+  }
+  let rangeTouch = null;
+  $("panel").addEventListener("touchstart", (e) => {
+    const r = e.target; if (!(r instanceof HTMLInputElement) || r.type !== "range" || e.touches.length !== 1) return;
+    rangeTouch = { r, moved: false }; rangeTouch.moved = rangeFromTouch(r, e.touches[0].clientX);
+  }, { passive: true });
+  $("panel").addEventListener("touchmove", (e) => {
+    if (!rangeTouch) return;
+    e.preventDefault();
+    if (rangeFromTouch(rangeTouch.r, e.touches[0].clientX)) rangeTouch.moved = true;
+  }, { passive: false });
+  const rangeEnd = () => { if (rangeTouch && rangeTouch.moved) rangeTouch.r.dispatchEvent(new Event("change", { bubbles: true })); rangeTouch = null; };
+  $("panel").addEventListener("touchend", rangeEnd); $("panel").addEventListener("touchcancel", rangeEnd);
   // phones: the panel is a bottom sheet over half the map, so it starts folded; wide screens (tablets, PCs): as it
   // was left (open the first time)
   if (!wideMq.matches) setFolded(true);
