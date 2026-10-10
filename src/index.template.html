@@ -1244,7 +1244,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const flip = (id) => { const e = $(id); e.checked = !e.checked; e.dispatchEvent(new Event("change")); viewCtl.update(); };
     viewCtl.marks = mk(ICON_MARKS, () => flip("radarMarks"));
     viewCtl.triple = mk(ICON_TRIPLE, () => flip("triple"));
-    viewCtl.clear = mk(ICON_CLEAR, clearSel);
+    viewCtl.clear = mk(ICON_CLEAR, () => grpClearable() ? clearGroupAll() : clearSel());
     L.DomEvent.disableClickPropagation(box);
     return box;
   };
@@ -1255,10 +1255,25 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     viewCtl.marks.title = `レーダーに入る駅に順位の番号：${m ? "オン" : "オフ"}`;
     viewCtl.triple.classList.toggle("on", t); viewCtl.triple.setAttribute("aria-pressed", String(t));
     viewCtl.triple.title = `三重表示（k・k−2・k−6）：${t ? "オン" : "オフ"}`;
-    viewCtl.clear.hidden = st.sel < 0; viewCtl.clear.title = "選んだ駅の選択を解除";
+    // in the multi-station mode it clears the whole group (and the selection); otherwise the selected station
+    const g = grpClearable();
+    viewCtl.clear.hidden = !g && st.sel < 0; viewCtl.clear.title = g ? "グループの駅と選択をすべて解除" : "選んだ駅の選択を解除";
     for (const a of [viewCtl.marks, viewCtl.triple, viewCtl.clear]) a.setAttribute("aria-label", a.title);
   };
   viewCtl.addTo(map);
+  const grpClearable = () => $("grpMode").checked && grp.ids.length > 0;
+  // clear the group and the selection at once, undoable for UNDO_MS (a tap on the map button is easy to make)
+  function clearGroupAll() {
+    const ids = grp.ids.slice(), selId = st.sel >= 0 && st.rows[st.sel] ? st.rows[st.sel][0] : null;
+    grp.ids = []; saveGroup(); drawDots(); updateLabels();
+    if (selId != null) clearSel(); else drawGroup();
+    toast(`グループの ${ids.length} 駅と選択を解除しました`, ["元に戻す", () => {
+      grp.ids = ids; saveGroup();
+      const i = selId != null ? st.rows.findIndex(r => r[0] === selId) : -1;
+      if (i >= 0) select(i, false); else { drawDots(); updateLabels(); drawGroup(); }
+      toast("グループと選択を元に戻しました");
+    }], UNDO_MS);
+  }
   function clearSel() {
     st.sel = -1; $("q").value = "";
     try { history.replaceState(null, "", `#k=${st.k}&m=${st.metric}`); } catch (e) {}
@@ -1339,7 +1354,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (gi.length && !map.hasLayer(grp.r)) grp.r.addTo(map);       // its _draw draws it
     else if (!gi.length && map.hasLayer(grp.r)) map.removeLayer(grp.r);
     else if (gi.length) drawGroupCanvas();
-    multiCtl.update && multiCtl.update();
+    multiCtl.update && multiCtl.update(); viewCtl.update && viewCtl.update();
     track.prev = null; if (track.pos) evaluate(false); // the group changed: re-baseline without notifying
   }
   function saveGroup() { try { localStorage.setItem("group", JSON.stringify(grp.ids)); } catch (e) {} }
