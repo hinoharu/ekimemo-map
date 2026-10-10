@@ -113,6 +113,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 body.compact #selBar .fig, body.compact #selBar .kana { display: none; }
 #grpBar .gi { font-size: 12px; color: #4c1d95; }
 #grpBar .gi.none { color: #fff; background: rgba(124, 58, 237, 0.9); border-radius: 4px; padding: 3px 8px; justify-self: start; }
+body.compact #grpBar, body.compact #selBar { left: 46px; max-width: calc(100% - 110px); } /* right of the left buttons */
 @media (min-width: 641px) { body:not(.folded) #grpBar, body:not(.folded) #selBar { left: 352px; max-width: calc(100% - 420px); } } /* right of the open panel */
 #updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + var(--gb, 0px) + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 8px; background: #1d2433; color: #fff; padding: 6px 6px 6px 14px; border-radius: 6px;
@@ -1490,8 +1491,13 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const g = $("grpBar"), sb = $("selBar");
     sb.hidden = !(st.sel >= 0 && sb.firstChild && !$("grpMode").checked);
     const vis = !g.hidden ? g : !sb.hidden ? sb : null;
-    document.body.style.setProperty("--gb", vis ? vis.offsetHeight + 8 + "px" : "0px");
+    // down to the very bottom of the map, just above the attribution (which must stay visible: CC BY), however many
+    // rows (user: the split screen leaves little room). Toasts go above the bar
+    const at = document.querySelector(".leaflet-control-attribution"), bottom = (at ? at.offsetHeight : 16) + 4;
+    for (const b of [g, sb]) b.style.bottom = `calc(${bottom}px + env(safe-area-inset-bottom, 0px))`;
+    document.body.style.setProperty("--gb", vis ? Math.max(0, bottom + vis.offsetHeight + 8 - 40) + "px" : "0px");
   }
+  window.addEventListener("resize", syncBars);
   function drawGroup() {
     const all = grpAll(), gi = grpIdx(), polys = gi.map(i => region(i, st.k).latlng);
     grp.area = groupArea(polys);
@@ -1518,7 +1524,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     else if (grp.ids.length >= GRP_MAX) { toast(`グループは ${GRP_MAX} 駅までです`); return; }
     else grp.ids.push(id);
     saveGroup(); drawDots(); updateLabels(); drawGroup();
-    toast(`${name} を${at >= 0 ? "グループから外しました" : "グループに追加しました"}（${grp.ids.length} 駅）`);
+    // compact mode (split screen): no toast; the pills in the bar show it (user: the toast covered the map's middle)
+    if (!document.body.classList.contains("compact")) toast(`${name} を${at >= 0 ? "グループから外しました" : "グループに追加しました"}（${grp.ids.length} 駅）`);
   }
   $("grpList").addEventListener("click", (e) => {
     const b = e.target.closest(".chip"); if (!b) return;
@@ -1824,7 +1831,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     for (const c of [zoomCtl, viewCtl, multiCtl]) c.setPosition(on ? "topleft" : "topright");
     viewCtl.update(); multiCtl.update(); // setPosition re-runs onAdd: new buttons, without their state (on / disabled)
     arrangeControls();
-    map.invalidateSize();
+    map.invalidateSize(); syncBars();
   }
   // right column, top to bottom: layers, zoom, location, view (the big layer button at the top, not in the middle)
   function arrangeControls() {
