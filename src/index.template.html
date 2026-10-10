@@ -1704,6 +1704,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     // zoom and view buttons: on the left (under the nearest station) in compact mode (the menu button is at the
     // bottom right), else back to the right column
     for (const c of [zoomCtl, viewCtl, multiCtl]) c.setPosition(on ? "topleft" : "topright");
+    viewCtl.update(); multiCtl.update(); // setPosition re-runs onAdd: new buttons, without their state (on / disabled)
     arrangeControls();
     map.invalidateSize();
   }
