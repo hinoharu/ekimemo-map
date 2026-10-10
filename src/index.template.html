@@ -93,6 +93,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   display: flex; align-items: center; gap: 10px; background: #1d2433; color: #fff; padding: 8px 14px; border-radius: 4px; font-size: 13px;
   width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); }
 #toast[hidden] { display: none; }
+#toast { cursor: pointer; } /* a tap closes it */
 #toast button { font: inherit; font-weight: 700; border: none; border-radius: 4px; background: #fff; color: #1d2433; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
 /* multi-station mode: the group's stations as purple pills at the bottom of the map, with the overlap's area */
 #grpBar, #selBar { position: fixed; z-index: 1040; left: 8px; bottom: calc(40px + env(safe-area-inset-bottom, 0px)); max-width: calc(100% - 76px);
@@ -1234,17 +1235,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const open = nearBox.classList.toggle("open");
     try { localStorage.setItem("nearOpen", open ? "1" : "0"); } catch (e) {}
     if (open && track.pos) fillNearList(track.pos.lat, track.pos.lng);
-    fitNearList();
   });
-  // the list's height: down to just above the bottom bar (or the attribution), never over them
-  function fitNearList() {
-    if (!nearBox.classList.contains("open") || nearBox.hidden) return;
-    const ol = nearBox.querySelector("ol"), top = ol.getBoundingClientRect().top;
-    const bars = [$("grpBar"), $("selBar")].filter(b => b.offsetHeight), at = document.querySelector(".leaflet-control-attribution");
-    const limit = bars.length ? Math.min(...bars.map(b => b.getBoundingClientRect().top)) : at ? at.getBoundingClientRect().top : innerHeight;
-    const cap = document.body.classList.contains("compact") ? Infinity : innerHeight * 0.5; // compact: all the room there is
-    ol.style.maxHeight = Math.max(80, Math.min(limit - 8 - top, cap)) + "px";
-  }
   function fillNearList(lat, lng) {
     const R = track.radar; if (!R || !nearBox.classList.contains("open")) return;
     const s0 = st.rows[R.near];
@@ -1262,7 +1253,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (!$("nearOn").checked || near == null) { box.hidden = true; return; }
     const r = st.rows[near];
     box.firstChild.innerHTML = `<div class="k">${simulated ? "指定位置の" : ""}最寄り駅</div>${r[3] ? `<div class="y">${esc(r[3])}</div>` : ""}<div class="n"><span class="nm">${esc(r[2])}</span>${isUa(near) || r[6] ? `<span class="bd">${isUa(near) ? '<span class="ua">未取得</span>' : ""}${r[6] ? '<span class="cl">廃止</span>' : ""}</span>` : ""}</div><div class="d">${km(lat, lng, r[4], r[5])}</div>`;
-    box.hidden = false; fillNearList(lat, lng); fitNearList();
+    box.hidden = false; fillNearList(lat, lng);
   }
 
   function notify(msg) {
@@ -1506,8 +1497,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     // rows (user: the split screen leaves little room). Toasts go above the bar
     const at = document.querySelector(".leaflet-control-attribution"), bottom = (at ? at.offsetHeight : 16) + 4;
     for (const b of [g, sb]) b.style.bottom = `calc(${bottom}px + env(safe-area-inset-bottom, 0px))`;
-    document.body.style.setProperty("--gb", vis ? Math.max(0, bottom + vis.offsetHeight + 8 - 40) + "px" : "0px");
-    fitNearList();
+    // compact mode (split screen): toasts at the very bottom, over the bar, rather than above it in the middle of the
+    // map where they covered the nearest-station list for seconds (user)
+    const compact = document.body.classList.contains("compact");
+    document.body.style.setProperty("--gb", compact ? bottom - 40 + "px" : vis ? Math.max(0, bottom + vis.offsetHeight + 8 - 40) + "px" : "0px");
   }
   window.addEventListener("resize", syncBars);
   function drawGroup() {
@@ -1707,7 +1700,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // a short message at the bottom; with action = [label, fn], also a button (e.g. undo) until it disappears
   function toast(msg, action, ms) {
     let el = document.getElementById("toast");
-    if (!el) { el = document.createElement("div"); el.id = "toast"; el.setAttribute("role", "status"); document.body.appendChild(el); }
+    if (!el) {
+      el = document.createElement("div"); el.id = "toast"; el.setAttribute("role", "status"); document.body.appendChild(el);
+      el.addEventListener("click", (e) => { if (!e.target.closest("button")) { el.hidden = true; clearTimeout(toastTimer); } }); // a tap closes it
+    }
     el.textContent = msg;
     if (action) {
       const b = document.createElement("button"); b.textContent = action[0];
