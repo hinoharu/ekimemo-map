@@ -926,14 +926,24 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const t0 = performance.now();
     const R = region(st.sel, st.k);
     const ms = performance.now() - t0;
-    const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), fillColor: st.style.sel.color, fillOpacity: 0.16, interactive: false });
+    const tri = $("triple").checked;
+    // three-fold view: the fills match the rank numbers' colors (user): ≤ k−6 blue, ≤ k−2 green, ≤ k orange, each band a
+    // ring (the inner area cut out) so the colors do not mix; the lines stay in the selection's color and dash
+    if (tri) {
+      const lv = [st.k, st.k - 2, st.k - 6].filter(kk => kk >= 1).map(kk => region(st.sel, kk).latlng);
+      lv.forEach((ll, j) => {
+        const fill = TIER[2 - j], ring = L.polygon(j + 1 < lv.length ? [ll, lv[j + 1]] : [ll], { renderer: lineR, stroke: false, fillColor: fill, fillOpacity: 0.22, interactive: false });
+        ring.tierFill = fill; ring.addTo(regionLayer);
+      });
+    }
+    const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), fill: !tri, fillColor: st.style.sel.color, fillOpacity: 0.16, interactive: false });
     poly.addTo(regionLayer);
     // three-fold view: k, k−2, k−6 (the inner two as dashed / dotted lines, a little fill each)
     const extra = [];
     if ($("triple").checked) for (const [dk, dash] of TRIPLE) {
       const kk = st.k - dk; if (kk < 1) continue;
       const Rk = region(st.sel, kk);
-      const pl = L.polygon(Rk.latlng, { renderer: lineR, ...lineStyle("sel"), dashArray: dash, fillColor: st.style.sel.color, fillOpacity: 0.1, interactive: false });
+      const pl = L.polygon(Rk.latlng, { renderer: lineR, ...lineStyle("sel"), dashArray: dash, fill: false, interactive: false });
       pl.tripleDash = dash; pl.addTo(regionLayer);
       extra.push(`<span>${kk} 位以内（${dash === TRIPLE[0][1] ? "破線" : "点線"}）${fmtArea(sphericalArea(Rk.latlng))} km²</span>`);
     }
@@ -2008,7 +2018,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   function restyle(kind) {
     const ls = lineStyle(kind);
-    if (kind === "sel") regionLayer.eachLayer(l => l.setStyle({ ...ls, fillColor: ls.color, ...(l.tripleDash ? { dashArray: l.tripleDash } : {}) }));
+    if (kind === "sel") regionLayer.eachLayer(l => l.tierFill ? null : l.setStyle({ ...ls, fillColor: ls.color, ...(l.tripleDash ? { dashArray: l.tripleDash } : {}) }));
     if (kind === "vor") { vorLayer.eachLayer(l => l.setStyle(ls)); if ($("vorNames").checked) updateLabels(); }
     if (kind === "view") viewLayer.eachLayer(l => l.setStyle(ls));
     if (kind === "lv") levelLayer.eachLayer(l => l.setStyle({ ...ls, opacity: ls.opacity * lvOpacity(l.levelF) }));
