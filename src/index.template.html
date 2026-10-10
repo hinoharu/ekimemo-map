@@ -207,7 +207,10 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .geo-ctl a.on { background: var(--region); color: #fff; }
 .geo-ctl a.on:hover { background: #174b86; }
 .geo-ctl a.armed { color: var(--region); }
-.geo-ctl a[hidden] { display: none; } /* follow is on but the location is not in use */
+.geo-ctl a[hidden] { display: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chips:empty { display: none; }
+.chip { font: inherit; font-size: 12.5px; border: 1px solid #c4b5fd; background: #f5f3ff; color: #4c1d95; border-radius: 12px; padding: 2px 9px; cursor: pointer; } /* follow is on but the location is not in use */
 </style>
 </head>
 <body>
@@ -256,6 +259,15 @@ details.sub[open] > summary { margin-bottom: 4px; }
   </div>
 
   <div class="sel" id="selbox"></div>
+
+  <div class="sub" id="grpSec">
+    <div class="label">複数駅の重なり（全部の駅がレーダー k 位以内に入る地域）</div>
+    <label class="check"><input type="checkbox" id="grpMode"> 複数選択モード：地図の駅をタップしてグループに追加・削除（地図右の <b>⧉</b> ボタンでも切り替え）</label>
+    <div class="chips" id="grpList"></div>
+    <div class="note" id="grpInfo"></div>
+    <div class="row"><button class="btn" id="grpClear">グループを空にする</button></div>
+    <label class="check"><input type="checkbox" id="nGrp" checked> 現在地・指定位置が重なりの地域に出入りしたら通知</label>
+  </div>
 
   <div class="sub" id="uaSec">
     <div class="label">未取得駅<output id="uaCount" style="font-size:13px"></output></div>
@@ -437,6 +449,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([35.68, 139.76], 11);
   const zoomCtl = L.control.zoom({ position: "topright" }).addTo(map);
   const viewCtl = L.control({ position: "topright" }); // view buttons (rank numbers, three-fold, clear); built below
+  const multiCtl = L.control({ position: "topright" }); // multi-station mode button; built below
+  const grp = { r: null, ids: [], area: null }; // multi-station overlap (filled in by the group section below)
   const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
   // load tiles while the map is still moving (Leaflet's default on phones waits until it stops) and keep
   // 4 rows of tiles beyond the screen, so going back and forth does not reload them
@@ -616,6 +630,12 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       for (let k = 0; k < pts.length; k += 2) { ctx.beginPath(); ctx.arc(pts[k], pts[k + 1], s.radius, 0, 2 * Math.PI); ctx.stroke(); ctx.fill(); }
       ctx.globalAlpha = 1;
     }
+    for (const i of grpIdx()) { // group members (multi-station overlap): a purple ring
+      const r = st.rows[i]; if (!llb.contains([r[4], r[5]])) continue;
+      const p = map.latLngToLayerPoint([r[4], r[5]]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7.5, 0, 2 * Math.PI); ctx.lineWidth = 4; ctx.strokeStyle = "#fff"; ctx.stroke();
+      ctx.lineWidth = 2.2; ctx.strokeStyle = GRP_COLOR; ctx.stroke();
+    }
     if (st.sel >= 0 && st.rows[st.sel]) { // the selected station: dot + ring, on top
       const r = st.rows[st.sel], p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(st.sel);
       const circle = (rad, w, color, fill) => { ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, 2 * Math.PI); if (fill) { ctx.fillStyle = fill; ctx.globalAlpha = s.fillOpacity; ctx.fill(); ctx.globalAlpha = 1; } ctx.lineWidth = w; ctx.strokeStyle = color; ctx.stroke(); };
@@ -782,6 +802,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     regionLayer.clearLayers(); levelLayer.clearLayers();
     drawDots();
     if (viewCtl.update) viewCtl.update();
+    if (grp.r) drawGroup();
     if (st.sel < 0) { // nothing selected (cleared)
       $("selbox").innerHTML = '<div class="note">駅を選んでいません。地図の駅をタップするか、上の欄で検索してください。</div>';
       st.levelJob++; cancelAsync("lv");
@@ -872,6 +893,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     };
     draw(all, 12, 6, (r) => r[6] ? "#687089" : "#1d2433");
     draw(ua, 12, 7, (r) => r[6] ? "#8e44ad" : "#d1267a");
+    draw(grpIdx().filter(i => i !== st.sel), 13, 11, () => GRP_COLOR);
     if (st.sel >= 0 && st.rows[st.sel]) draw([st.sel], 14, 13, () => "#c2410c");
     if ($("vorNames").checked) drawVorNames(ctx);
   }
@@ -987,9 +1009,11 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const n = st.rows.length, K = Math.max(1, st.k), top = [];
     const selKey = st.sel >= 0 ? distKey(st.idx, st.metric, lat, lng, st.sel) : null;
     let selRank = 1;
+    const gi = grpIdx(), gKey = gi.map(i => distKey(st.idx, st.metric, lat, lng, i)), gRank = gi.map(() => 1);
     for (let t = 0; t < n; t++) {
       const d = distKey(st.idx, st.metric, lat, lng, t);
       if (selKey !== null && t !== st.sel && d < selKey) selRank++;
+      for (let g = 0; g < gi.length; g++) if (t !== gi[g] && d < gKey[g]) gRank[g]++;
       if (top.length < K || d < top[top.length - 1][0]) {
         let p = top.length < K ? top.length : K - 1;
         if (top.length < K) top.push(null);
@@ -997,7 +1021,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
         top[p] = [d, t];
       }
     }
-    return { top: top.map(x => x[1]), selRank };
+    return { top: top.map(x => x[1]), selRank, gRank };
   }
 
   function setPosition(lat, lng, acc, simulated) {
@@ -1020,6 +1044,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const { lat, lng, acc, simulated } = track.pos;
     const R = rankAt(lat, lng), near = R.top[0], set = new Set(R.top);
     const inSel = st.sel >= 0 && R.selRank <= st.k;
+    const grpKey = grp.ids.join(","), inGrp = grp.ids.length >= 2 && R.gRank.length === grp.ids.length && R.gRank.every(q => q <= st.k);
     const uaIn = R.top.filter(isUa), uaSet = new Set(uaIn);
     const P = track.prev;
     if (notifyChanges && P) {
@@ -1034,10 +1059,12 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
         if (inn.length) notify(`未取得駅がレーダーに入りました：${inn.map(nm).join("・")}` + (inn.includes(near) ? `（${nm(near)} は最寄り＝位置登録で取れます）` : ""));
         else if (P.near !== near && isUa(near)) notify(`最寄り駅 ${nm(near)} は未取得です（位置登録で取れます）`);
       }
+      if ($("nGrp").checked && grp.ids.length >= 2 && P.grpKey === grpKey && P.inGrp !== inGrp)
+        notify(inGrp ? `重なりの地域に入りました（${grp.ids.length} 駅すべてがレーダー圏内）` : `重なりの地域から出ました`);
       if ($("nSel").checked && st.sel >= 0 && P.sel === st.sel && P.inSel !== inSel)
         notify(inSel ? `${nm(st.sel)} の圏内に入りました（${R.selRank} 位）` : `${nm(st.sel)} の圏外に出ました（${R.selRank} 位）`);
     }
-    track.prev = { near, set, inSel, sel: st.sel, uaSet };
+    track.prev = { near, set, inSel, sel: st.sel, uaSet, inGrp, grpKey };
     const r0 = st.rows[near];
     // radar from the position, and from its nearest station (where the game puts you after registering there)
     const fromStn = nearestK(r0[4], r0[5], Math.max(1, st.k));
@@ -1230,6 +1257,114 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     redraw(false);
   }
   for (const id of ["radarMarks", "triple"]) $(id).addEventListener("change", () => viewCtl.update());
+
+  // ---------------- multi-station overlap: where every station of a group is within the radar's k
+  // The group is kept as station ids (indices change when closed stations are shown / hidden) in localStorage "group".
+  // Each member's R_k is the usual exact region; their intersection is cut out on a canvas: fill the first, then keep
+  // only what every other one covers ("destination-in"). The outline is each member's boundary kept inside all the
+  // others. Area: the same on a small offscreen raster (about 512 px over the overlap's box; an approximation).
+  const GRP_COLOR = "#7c3aed", GRP_MAX = 12;
+  function grpIdx() { const out = []; for (const id of grp.ids) { const i = st.rows.findIndex(r => r[0] === id); if (i >= 0) out.push(i); } return out; }
+  const GroupCanvas = StickyCanvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawGroupCanvas(); } });
+  const grpPane = map.createPane("grp"); grpPane.style.zIndex = 398; grpPane.style.pointerEvents = "none"; // below the boundary lines
+  grp.r = new GroupCanvas({ pane: "grp", padding: 0.3 }).addTo(map);
+  let grpOff = null; // offscreen canvas for the compositing
+  const grpPolys = () => grpIdx().map(i => region(i, st.k).latlng);
+  function drawGroupCanvas() {
+    const R = grp.r, ctx = R && R._ctx, b = R && R._bounds;
+    if (!ctx || !b) return;
+    ctx.clearRect(b.min.x, b.min.y, b.max.x - b.min.x, b.max.y - b.min.y);
+    const polys = grpPolys(); if (!polys.length) return;
+    const pts = polys.map(ll => ll.map(q => map.latLngToLayerPoint(q)));
+    const path = (c, P) => { c.beginPath(); P.forEach((p, k) => k ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.closePath(); };
+    // each member's own boundary: thin and faint
+    ctx.save(); ctx.globalAlpha = 0.45; ctx.lineWidth = 1; ctx.strokeStyle = GRP_COLOR; ctx.setLineDash([4, 4]);
+    for (const P of pts) { path(ctx, P); ctx.stroke(); }
+    ctx.restore();
+    if (pts.length < 2) return;
+    const W = ctx.canvas.width, H = ctx.canvas.height;
+    if (!grpOff) grpOff = document.createElement("canvas");
+    if (grpOff.width !== W || grpOff.height !== H) { grpOff.width = W; grpOff.height = H; }
+    const o = grpOff.getContext("2d"), T = ctx.getTransform();
+    const keepInside = (skip) => { o.globalCompositeOperation = "destination-in"; o.fillStyle = "#000"; pts.forEach((P, j) => { if (j !== skip) { path(o, P); o.fill(); } }); o.globalCompositeOperation = "source-over"; };
+    const blit = (alpha) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(grpOff, 0, 0); ctx.restore(); };
+    o.setTransform(1, 0, 0, 1, 0, 0); o.clearRect(0, 0, W, H); o.setTransform(T);
+    o.fillStyle = GRP_COLOR; path(o, pts[0]); o.fill(); keepInside(0); blit(0.3);           // the overlap, filled
+    for (let i = 0; i < pts.length; i++) {                                                  // its outline
+      o.setTransform(1, 0, 0, 1, 0, 0); o.clearRect(0, 0, W, H); o.setTransform(T);
+      o.lineWidth = 2.5; o.strokeStyle = GRP_COLOR; o.lineJoin = "round"; path(o, pts[i]); o.stroke(); keepInside(i); blit(1);
+    }
+  }
+  // approximate area (km²) of the overlap: rasterise it over the intersection of the members' boxes
+  function groupArea(polys) {
+    if (polys.length < 2) return null;
+    let s = -90, n = 90, w = -180, e = 180;
+    for (const ll of polys) { let a = 90, b = -90, c = 180, d = -180; for (const [la, lo] of ll) { a = Math.min(a, la); b = Math.max(b, la); c = Math.min(c, lo); d = Math.max(d, lo); } s = Math.max(s, a); n = Math.min(n, b); w = Math.max(w, c); e = Math.min(e, d); }
+    if (s >= n || w >= e) return 0;
+    const cos = Math.cos((s + n) / 2 * Math.PI / 180), wx = (e - w) * cos, hy = n - s, SZ = 512, sc = SZ / Math.max(wx, hy);
+    const cw = Math.max(1, Math.ceil(wx * sc)), ch = Math.max(1, Math.ceil(hy * sc));
+    const c = document.createElement("canvas"); c.width = cw; c.height = ch; const o = c.getContext("2d");
+    const path = (ll) => { o.beginPath(); ll.forEach(([la, lo], k) => { const x = (lo - w) * cos * sc, y = (n - la) * sc; k ? o.lineTo(x, y) : o.moveTo(x, y); }); o.closePath(); };
+    o.fillStyle = "#000"; path(polys[0]); o.fill(); o.globalCompositeOperation = "destination-in";
+    for (let j = 1; j < polys.length; j++) { path(polys[j]); o.fill(); }
+    const d = o.getImageData(0, 0, cw, ch).data; let cnt = 0;
+    for (let k = 3; k < d.length; k += 4) cnt += d[k] / 255;
+    return cnt / (sc * sc) * 111.195 * 111.195;
+  }
+  function drawGroup() {
+    const gi = grpIdx(), polys = gi.map(i => region(i, st.k).latlng);
+    grp.area = groupArea(polys);
+    $("grpList").innerHTML = gi.map(i => `<button class="chip" data-id="${st.rows[i][0]}" title="グループから外す">${esc(st.rows[i][2])} ×</button>`).join("");
+    $("grpInfo").textContent = !gi.length ? "グループは空です。複数選択モードで地図の駅をタップすると追加できます。"
+      : gi.length === 1 ? "もう 1 駅以上追加すると、重なる地域を表示します。"
+      : grp.area > 0 ? `${gi.length} 駅すべてが ${st.k} 位以内に入る地域：約 ${fmtArea(grp.area)} km²（画素から求めた近似値）`
+      : `${gi.length} 駅すべてが ${st.k} 位以内に入る地域はありません。`;
+    $("grpClear").disabled = !gi.length;
+    if (grp.r && grp.r._ctx) drawGroupCanvas();
+    multiCtl.update && multiCtl.update();
+    track.prev = null; if (track.pos) evaluate(false); // the group changed: re-baseline without notifying
+  }
+  function saveGroup() { try { localStorage.setItem("group", JSON.stringify(grp.ids)); } catch (e) {} }
+  function toggleGroup(i) {
+    const id = st.rows[i][0], at = grp.ids.indexOf(id), name = st.rows[i][2];
+    if (at >= 0) grp.ids.splice(at, 1);
+    else if (grp.ids.length >= GRP_MAX) { toast(`グループは ${GRP_MAX} 駅までです`); return; }
+    else grp.ids.push(id);
+    saveGroup(); drawDots(); updateLabels(); drawGroup();
+    toast(`${name} を${at >= 0 ? "グループから外しました" : "グループに追加しました"}（${grp.ids.length} 駅）`);
+  }
+  $("grpList").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    const i = st.rows.findIndex(r => r[0] === +b.dataset.id); if (i >= 0) toggleGroup(i);
+  });
+  $("grpClear").addEventListener("click", () => { grp.ids = []; saveGroup(); drawDots(); updateLabels(); drawGroup(); });
+  // map button: multi-station mode on / off (the panel is often out of reach in split screen)
+  const ICON_MULTI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="10" r="6"/><circle cx="15" cy="10" r="6"/><circle cx="12" cy="15" r="6"/><path d="M12 10.6a6 6 0 0 1 0 .01" stroke-width="3" stroke-linecap="round"/></svg>';
+  multiCtl.onAdd = () => {
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl multi-ctl");
+    const a = L.DomUtil.create("a", "", box); a.href = "#"; a.setAttribute("role", "button"); a.innerHTML = ICON_MULTI;
+    L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); setGroupMode(!$("grpMode").checked); });
+    L.DomEvent.disableClickPropagation(box); multiCtl.btn = a;
+    return box;
+  };
+  multiCtl.update = () => {
+    if (!multiCtl.btn) return;
+    const on = $("grpMode").checked;
+    multiCtl.btn.classList.toggle("on", on); multiCtl.btn.setAttribute("aria-pressed", String(on));
+    multiCtl.btn.title = `複数選択モード：${on ? "オン（駅のタップでグループに追加・削除）" : "オフ"}${grp.ids.length ? `・${grp.ids.length} 駅` : ""}`;
+    multiCtl.btn.setAttribute("aria-label", multiCtl.btn.title);
+  };
+  function setGroupMode(on) {
+    $("grpMode").checked = on; multiCtl.update();
+    toast(on ? "複数選択モード：駅をタップするとグループに追加・削除します" : "複数選択モードを終えました");
+  }
+  $("grpMode").addEventListener("change", () => setGroupMode($("grpMode").checked));
+  $("nGrp").addEventListener("change", () => { try { localStorage.setItem("nGrp", $("nGrp").checked ? "1" : "0"); } catch (e) {} });
+  multiCtl.addTo(map); multiCtl.update();
+  try {
+    const g = JSON.parse(localStorage.getItem("group") || "[]"); if (Array.isArray(g)) grp.ids = g.filter(Number.isFinite).slice(0, GRP_MAX);
+    if (localStorage.getItem("nGrp") === "0") $("nGrp").checked = false;
+  } catch (e) {}
   setInterval(() => { // periodic re-centering
     if (following() && track.pos && !paused()) {
       const c = map.getCenter();
@@ -1339,6 +1474,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // ---------------- ranking at a clicked point
   map.on("click", (e) => {
     const hitI = hitStation(e.layerPoint);
+    if (hitI >= 0 && $("grpMode").checked) { toggleGroup(hitI); return; } // multi-station mode: add / remove
     if (hitI >= 0) { select(hitI, false); centerOn(st.rows[hitI][4], st.rows[hitI][5]); return; } // tap on a station
     if (!$("dbgRank").checked) return; // debug tool, off by default
     const { lat, lng } = e.latlng, n = st.rows.length;
@@ -1513,13 +1649,13 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     document.body.classList.toggle("compact", on);
     // zoom and view buttons: on the left (under the nearest station) in compact mode (the menu button is at the
     // bottom right), else back to the right column
-    for (const c of [zoomCtl, viewCtl]) c.setPosition(on ? "topleft" : "topright");
+    for (const c of [zoomCtl, viewCtl, multiCtl]) c.setPosition(on ? "topleft" : "topright");
     arrangeControls();
     map.invalidateSize();
   }
   // right column, top to bottom: layers, zoom, location, view (the big layer button at the top, not in the middle)
   function arrangeControls() {
-    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
+    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl, multiCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
   }
   try { const cm = localStorage.getItem("compactMode"); if (["auto", "on", "off"].includes(cm)) $("compactMode").value = cm; } catch (e) {}
   $("compactMode").addEventListener("change", () => { try { localStorage.setItem("compactMode", $("compactMode").value); } catch (e) {} applyCompact(); });
