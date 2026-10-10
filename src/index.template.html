@@ -479,6 +479,14 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // Plain L.Canvas resizes, clears and redraws everything after every pan, which was the main cost of panning.
   // The pixel origin must also be unchanged: a long jump (e.g. from a list) resets the view, which moves the
   // origin of layer coordinates, and the old bounds could then "cover" the new view by coincidence (stale drawing).
+  // How far beyond the screen the canvases draw (so small pans need no redraw). Each canvas is (1 + 2·pad)² screens of
+  // device pixels; with 7–8 of them a large retina screen (iPad: 1024×1366 at 2×, ~57 MB a canvas at 30 %) went over
+  // iOS's canvas memory and Safari killed the page ("a problem repeatedly occurred"). Keep one canvas near 6 M device
+  // pixels: phones and ordinary PCs stay at 30 %, an iPad gets 10 %.
+  const CANVAS_PAD = (() => {
+    const r = (window.devicePixelRatio || 1) > 1 ? 2 : 1, w = Math.max(screen.width, screen.height) || 1000, h = Math.min(screen.width, screen.height) || 800;
+    return Math.max(0.1, Math.min(0.3, (Math.sqrt(6e6 / (w * h * r * r)) - 1) / 2));
+  })();
   const StickyCanvas = L.Canvas.extend({
     _update() {
       const m = this._map;
@@ -492,7 +500,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     },
   });
   const RailCanvas = StickyCanvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawRail(); } });
-  const railR = new RailCanvas({ pane: "rail", padding: 0.3 });
+  const railR = new RailCanvas({ pane: "rail", padding: CANVAS_PAD });
   const RAIL_NO_COLOR = "#8a8f99";
   let railData = null, railLoading = null;
   function loadRail() {
@@ -549,14 +557,14 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const dotPane = map.createPane("stations"); dotPane.style.zIndex = 610; dotPane.style.pointerEvents = "none";
   // our drawing goes in _draw: Leaflet clears the canvas and calls _draw after every pan/zoom/resize
   const DotCanvas = StickyCanvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawDots(); } });
-  const dotR = new DotCanvas({ pane: "stations", padding: 0.3 });
-  const lineR = new StickyCanvas({ padding: 0.3 }); // boundaries (overlayPane, below the dots)
+  const dotR = new DotCanvas({ pane: "stations", padding: CANVAS_PAD });
+  const lineR = new StickyCanvas({ padding: CANVAS_PAD }); // boundaries (overlayPane, below the dots)
   // current-position dot (an HTML marker, so it can animate): above the station dots and name labels
   // (markerPane 600; tooltips 650 and popups 700 stay on top), click-through so it never hides the stations from taps
   const mePane = map.createPane("me"); mePane.style.zIndex = 640; mePane.style.pointerEvents = "none";
   // unacquired-station areas: filled at full opacity on their own panes, the pane opacity makes
   // the union look uniform (overlaps don't get darker); click-through
-  const uaPane = (name, z, op) => { const p = map.createPane(name); p.style.zIndex = z; p.style.opacity = op; p.style.pointerEvents = "none"; return new StickyCanvas({ pane: name, padding: 0.3 }); };
+  const uaPane = (name, z, op) => { const p = map.createPane(name); p.style.zIndex = z; p.style.opacity = op; p.style.pointerEvents = "none"; return new StickyCanvas({ pane: name, padding: CANVAS_PAD }); };
   const uaRK = uaPane("uaK", 380, 0.18), uaR1 = uaPane("ua1", 390, 0.3);
   const uaLayerK = L.layerGroup().addTo(map), uaLayer1 = L.layerGroup().addTo(map);
   const vorLayer = L.layerGroup().addTo(map);
@@ -853,7 +861,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const nameCanvas = L.DomUtil.create("canvas", "leaflet-zoom-hide", namePane);
   const nameCtx = nameCanvas.getContext("2d");
   let nameFont = null;
-  const NAME_PAD = 0.3; // drawn this much beyond each screen edge, so names are there while dragging
+  const NAME_PAD = CANVAS_PAD; // drawn this much beyond each screen edge, so names are there while dragging
   let nameDrawn = null; // { zoom, bounds (layer px) } of the last drawing
   function updateLabelsOnMove() { // skip while the last drawing still covers the view (same zoom)
     const v = L.bounds(map.containerPointToLayerPoint([0, 0]), map.containerPointToLayerPoint(map.getSize()));
@@ -1267,7 +1275,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   function grpIdx() { const out = []; for (const id of grp.ids) { const i = st.rows.findIndex(r => r[0] === id); if (i >= 0) out.push(i); } return out; }
   const GroupCanvas = StickyCanvas.extend({ _draw() { L.Canvas.prototype._draw.call(this); drawGroupCanvas(); } });
   const grpPane = map.createPane("grp"); grpPane.style.zIndex = 398; grpPane.style.pointerEvents = "none"; // below the boundary lines
-  grp.r = new GroupCanvas({ pane: "grp", padding: 0.3 }).addTo(map);
+  grp.r = new GroupCanvas({ pane: "grp", padding: CANVAS_PAD }); // on the map only while the group has stations (memory)
   let grpOff = null; // offscreen canvas for the compositing
   const grpPolys = () => grpIdx().map(i => region(i, st.k).latlng);
   function drawGroupCanvas() {
@@ -1294,6 +1302,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       o.setTransform(1, 0, 0, 1, 0, 0); o.clearRect(0, 0, W, H); o.setTransform(T);
       o.lineWidth = 2.5; o.strokeStyle = GRP_COLOR; o.lineJoin = "round"; path(o, pts[i]); o.stroke(); keepInside(i); blit(1);
     }
+    grpOff.width = grpOff.height = 0; // give the memory back at once (iOS counts every canvas)
   }
   // approximate area (km²) of the overlap: rasterise it over the intersection of the members' boxes
   function groupArea(polys) {
@@ -1320,7 +1329,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       : grp.area > 0 ? `${gi.length} 駅すべてが ${st.k} 位以内に入る地域：約 ${fmtArea(grp.area)} km²（画素から求めた近似値）`
       : `${gi.length} 駅すべてが ${st.k} 位以内に入る地域はありません。`;
     $("grpClear").disabled = !gi.length;
-    if (grp.r && grp.r._ctx) drawGroupCanvas();
+    if (gi.length && !map.hasLayer(grp.r)) grp.r.addTo(map);       // its _draw draws it
+    else if (!gi.length && map.hasLayer(grp.r)) map.removeLayer(grp.r);
+    else if (gi.length) drawGroupCanvas();
     multiCtl.update && multiCtl.update();
     track.prev = null; if (track.pos) evaluate(false); // the group changed: re-baseline without notifying
   }
