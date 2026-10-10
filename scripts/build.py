@@ -151,13 +151,12 @@ def main():
         fetch_lines(version)
     template = (SRC / "index.template.html").read_text(encoding="utf-8")
     core = (SRC / "station_core.js").read_text(encoding="utf-8")
-    for ph in ("/*CORE*/", "/*DATA*/", "/*VERSION*/"):
+    for ph in ("/*CORE*/", "/*DATA*/", "/*VERSION*/", "/*BUILD*/"):
         if template.count(ph) != 1:
             sys.exit(f"template must contain exactly one {ph}")
     data = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
     html = template.replace("/*CORE*/", core).replace("/*VERSION*/", version).replace("/*DATA*/", data)
     DIST.mkdir(exist_ok=True)
-    (DIST / "index.html").write_text(html, encoding="utf-8")
     if (DATA / "lines.json").exists():
         shutil.copyfile(DATA / "lines.json", DIST / "lines.json")
     else:
@@ -168,15 +167,21 @@ def main():
     icons = sorted((SRC / "icons").glob("*.png"))
     for p in icons:
         shutil.copyfile(p, DIST / "icons" / p.name)
-    # service worker: the build hash renames its page cache, so a new build replaces the old copy
-    h = hashlib.sha256(html.encode("utf-8"))
-    for p in [DIST / "lines.json", DIST / "manifest.webmanifest"] + [DIST / "icons" / q.name for q in icons]:
-        if p.exists():
-            h.update(p.read_bytes())
+    # build id: a hash of everything published (the page before the id goes in, the service worker's source, lines,
+    # manifest, icons). It renames the service worker's page cache, so a new build replaces the old copy, and the page
+    # carries it too, so iOS can find a newer build by comparing it with the one in the published sw.js
     sw = (SRC / "sw.js").read_text(encoding="utf-8")
     if sw.count("/*BUILD*/") != 1:
         sys.exit("src/sw.js must contain exactly one /*BUILD*/")
-    (DIST / "sw.js").write_text(sw.replace("/*BUILD*/", h.hexdigest()[:12]), encoding="utf-8")
+    h = hashlib.sha256(html.encode("utf-8"))
+    h.update(sw.encode("utf-8"))
+    for p in [DIST / "lines.json", DIST / "manifest.webmanifest"] + [DIST / "icons" / q.name for q in icons]:
+        if p.exists():
+            h.update(p.read_bytes())
+    build_id = h.hexdigest()[:12]
+    html = html.replace("/*BUILD*/", build_id)
+    (DIST / "index.html").write_text(html, encoding="utf-8")
+    (DIST / "sw.js").write_text(sw.replace("/*BUILD*/", build_id), encoding="utf-8")
     # rows as JSON for tests (not deployed)
     (ROOT / "build").mkdir(exist_ok=True)
     (ROOT / "build" / "stations.json").write_text(data, encoding="utf-8")
