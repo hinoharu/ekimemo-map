@@ -1446,10 +1446,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const polys = grpPolys(); if (!polys.length) return;
     const pts = polys.map(ll => ll.map(q => map.latLngToLayerPoint(q)));
     const path = (c, P) => { c.beginPath(); P.forEach((p, k) => k ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.closePath(); };
-    // each member's own boundary: thin and faint
-    ctx.save(); ctx.globalAlpha = 0.45; ctx.lineWidth = 1; ctx.strokeStyle = C.grp; ctx.setLineDash([4, 4]);
-    for (const P of pts) { path(ctx, P); ctx.stroke(); }
-    ctx.restore();
+    // (each member's own boundary used to be drawn as a faint dashed line: dropped, it only cluttered the map — user)
     if (!(grp.area > 0)) return; // nothing in common: no fill, no outline (one member: its own region, as when selected)
     const W = ctx.canvas.width, H = ctx.canvas.height;
     if (!grpOff) grpOff = document.createElement("canvas");
