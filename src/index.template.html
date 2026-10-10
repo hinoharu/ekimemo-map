@@ -52,15 +52,15 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   box-shadow: 0 4px 16px rgba(20, 24, 34, 0.25); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 #nearBox[hidden] { display: none; }
 #nearBox .k { font-size: 9.5px; letter-spacing: 0.1em; opacity: 0.8; line-height: 1.3; }
-/* furigana + name in the left column, badges (未取得 / 廃止) in the right one, spanning both lines */
-#nearBox .yn { display: grid; grid-template-columns: minmax(0, auto) auto; column-gap: 7px; align-items: center; }
-#nearBox .y { grid-column: 1; font-size: 8.5px; font-weight: 700; letter-spacing: 0.08em; opacity: 0.92; line-height: 1.05; margin: 2px 0 0; } /* furigana */
-#nearBox .n { grid-column: 1; font-size: 17px; font-weight: 700; line-height: 1.2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#nearBox .bd { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; gap: 3px; }
-#nearBox .bd span { font-size: 9.5px; line-height: 1.45; padding: 0 5px; border-radius: 3px; text-align: center; }
+#nearBox .y { font-size: 8.5px; font-weight: 700; letter-spacing: 0.08em; opacity: 0.92; line-height: 1.05; margin: 2px 0 0; } /* furigana */
+#nearBox .n { font-size: 17px; font-weight: 700; line-height: 1.2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+#nearBox .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* badges right of the name, side by side: 未取得 (unacquired) / 廃止 (closed) */
+#nearBox .bd { display: flex; gap: 3px; flex: none; }
+#nearBox .bd span { font-size: 9.5px; line-height: 1.45; padding: 0 5px; border-radius: 3px; text-shadow: none; }
 #nearBox .d { font-size: 10.5px; opacity: 0.85; font-variant-numeric: tabular-nums; }
 #nearBox .ua { background: var(--ua); }
-#nearBox .cl { background: #7d8494; }
+#nearBox .cl { background: #6c7282; }
 @media (min-width: 641px) { #nearBox { left: 380px; } }
 /* "a new version is out" bar (the service worker of a newer build took over) */
 #toast { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom, 0px));
@@ -99,8 +99,6 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   body.compact #nearBox .k { font-size: 9px; letter-spacing: 0.04em; }
   body.compact #nearBox .n { font-size: 14px; }
   body.compact #nearBox .y { display: none; }
-  body.compact #nearBox .bd { flex-direction: row; gap: 3px; grid-row: 1; }
-  body.compact #nearBox .yn { display: flex; align-items: baseline; gap: 6px; }
   body.compact .panel { max-height: 64%; padding: 10px 12px; gap: 10px; }
   body.compact .panel .head { margin: -10px -12px 0; padding: 10px 12px 4px; top: -10px; }
   body.compact .panel.collapsed { right: 6px; bottom: calc(26px + env(safe-area-inset-bottom, 0px)); padding: 0; }
@@ -1054,7 +1052,7 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     const box = $("nearBox");
     if (!$("nearOn").checked || near == null) { box.hidden = true; return; }
     const r = st.rows[near];
-    box.innerHTML = `<div class="k">${simulated ? "指定位置の" : ""}最寄り駅</div><div class="yn">${r[3] ? `<div class="y">${esc(r[3])}</div>` : ""}<div class="n">${esc(r[2])}</div>${isUa(near) || r[6] ? `<span class="bd">${isUa(near) ? '<span class="ua">未取得</span>' : ""}${r[6] ? '<span class="cl">廃止</span>' : ""}</span>` : ""}</div><div class="d">${km(lat, lng, r[4], r[5])}</div>`;
+    box.innerHTML = `<div class="k">${simulated ? "指定位置の" : ""}最寄り駅</div>${r[3] ? `<div class="y">${esc(r[3])}</div>` : ""}<div class="n"><span class="nm">${esc(r[2])}</span>${isUa(near) || r[6] ? `<span class="bd">${isUa(near) ? '<span class="ua">未取得</span>' : ""}${r[6] ? '<span class="cl">廃止</span>' : ""}</span>` : ""}</div><div class="d">${km(lat, lng, r[4], r[5])}</div>`;
     box.hidden = false;
   }
 
