@@ -489,6 +489,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     return Math.max(0.1, Math.min(0.3, (Math.sqrt(6e6 / (w * h * r * r)) - 1) / 2));
   })();
   const StickyCanvas = L.Canvas.extend({
+    // removing a renderer destroys its canvas; the new one starts at 300×150, so a re-add must not take the old
+    // drawing as still covering the view (the overlap stayed invisible until a pan when the mode was left and re-entered)
+    onAdd() { this._bounds = null; L.Canvas.prototype.onAdd.call(this); },
     _update() {
       const m = this._map;
       if (m && this._bounds && !m._animatingZoom && this._zoom === m.getZoom() && this._size && this._size.equals(m.getSize())
