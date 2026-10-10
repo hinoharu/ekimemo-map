@@ -211,7 +211,7 @@ input[type=range] { width: 100%; accent-color: var(--region); touch-action: none
 .geo .label { margin-bottom: 2px; }
 .status { font-size: 12.5px; line-height: 1.5; }
 .status b { color: var(--region); }
-.log { margin: 0; padding: 0; list-style: none; max-height: 132px; overflow: auto; font-size: 12px; display: grid; gap: 3px; }
+.log { margin: 0; padding: 0; list-style: none; max-height: 260px; overflow: auto; font-size: 12px; display: grid; gap: 3px; }
 .log li { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
 .log time { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -364,7 +364,6 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
     </div>
     <div class="note">指定位置：地図を長押し（PC は右クリック）した地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
-    <ol class="log" id="log" aria-live="polite"></ol>
   </details>
 
   <details class="sec" data-sec="map">
@@ -497,6 +496,12 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <summary>駅データ更新</summary>
     <div class="note" id="datainfo"></div>
     <div><button class="btn" id="refresh">GitHub から最新データを取得</button></div>
+  </details>
+
+  <details class="sec" data-sec="log">
+    <summary>ログ</summary>
+    <div class="note" id="logEmpty">通知はまだありません（新しい順に最大 30 件。再読み込みで消えます）。</div>
+    <ol class="log" id="log" aria-live="polite"></ol>
   </details>
 </section>
 <button id="menuFab" class="menu-fab" aria-expanded="true" aria-label="メニューをたたむ"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
@@ -1189,8 +1194,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   });
   function fillNearList(lat, lng) {
     const R = track.radar; if (!R || !nearBox.classList.contains("open")) return;
+    const s0 = st.rows[R.near];
     const row = (i, q, sq) => { const r = st.rows[i], c = TIER[tierOf(q)];
-      return `<li><span class="no${sq ? " sq" : ""}" style="${sq ? `color:${c};border-color:${c}` : `background:${c}`}"><i class="${q >= 100 ? "n3" : q >= 10 ? "n2" : ""}">${q}</i></span><span class="nm2${uaHi() && isUa(i) ? " u" : ""}">${esc(r[2])}</span><span class="d2">${km(lat, lng, r[4], r[5])}</span></li>`; };
+      return `<li><span class="no${sq ? " sq" : ""}" style="${sq ? `color:${c};border-color:${c}` : `background:${c}`}"><i class="${q >= 100 ? "n3" : q >= 10 ? "n2" : ""}">${q}</i></span><span class="nm2${uaHi() && isUa(i) ? " u" : ""}">${esc(r[2])}</span><span class="d2">${sq ? `(${km(s0[4], s0[5], r[4], r[5])})` : km(lat, lng, r[4], r[5])}</span></li>`; };
     let html = R.fromPos.slice(1).map(([i, q]) => row(i, q, false)).join("");
     // オモイダース: counted from the registered (nearest) station, only those the position's radar lacks (square numbers,
     // as on the map; the user missed them here when they were only in the panel)
@@ -1210,7 +1216,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     toast(msg);
     const li = document.createElement("li"), d = new Date();
     li.innerHTML = `<time>${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}</time><span>${esc(msg)}</span>`;
-    $("log").prepend(li);
+    $("log").prepend(li); $("logEmpty").hidden = true;
     while ($("log").children.length > 30) $("log").lastChild.remove();
     try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {}
     try {
