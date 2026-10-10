@@ -208,6 +208,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .geo-ctl a.on:hover { background: #174b86; }
 .geo-ctl a.armed { color: var(--region); }
 .geo-ctl a[hidden] { display: none; }
+.geo-ctl a.disabled { opacity: 0.3; pointer-events: none; cursor: default; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chips:empty { display: none; }
 .chip { font: inherit; font-size: 12.5px; border: 1px solid #c4b5fd; background: #f5f3ff; color: #4c1d95; border-radius: 12px; padding: 2px 9px; cursor: pointer; } /* follow is on but the location is not in use */
@@ -1244,7 +1245,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const flip = (id) => { const e = $(id); e.checked = !e.checked; e.dispatchEvent(new Event("change")); viewCtl.update(); };
     viewCtl.marks = mk(ICON_MARKS, () => flip("radarMarks"));
     viewCtl.triple = mk(ICON_TRIPLE, () => flip("triple"));
-    viewCtl.clear = mk(ICON_CLEAR, () => grpClearable() ? clearGroupAll() : clearSel());
+    viewCtl.clear = mk(ICON_CLEAR, () => grpClearable() ? clearGroupAll() : st.sel >= 0 && clearSel());
     L.DomEvent.disableClickPropagation(box);
     return box;
   };
@@ -1257,7 +1258,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     viewCtl.triple.title = `三重表示（k・k−2・k−6）：${t ? "オン" : "オフ"}`;
     // in the multi-station mode it clears the whole group (and the selection); otherwise the selected station
     const g = grpClearable();
-    viewCtl.clear.hidden = !g && st.sel < 0; viewCtl.clear.title = g ? "グループの駅と選択をすべて解除" : "選んだ駅の選択を解除";
+    // nothing to clear: shown faint and inert rather than hidden (user's preference: the buttons keep their places)
+    const none = !g && st.sel < 0;
+    viewCtl.clear.classList.toggle("disabled", none); viewCtl.clear.setAttribute("aria-disabled", String(none));
+    viewCtl.clear.title = none ? "解除する駅はありません" : g ? "グループの駅と選択をすべて解除" : "選んだ駅の選択を解除";
     for (const a of [viewCtl.marks, viewCtl.triple, viewCtl.clear]) a.setAttribute("aria-label", a.title);
   };
   viewCtl.addTo(map);
