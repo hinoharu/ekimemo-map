@@ -145,7 +145,7 @@ input[type=text], input[type=number], select {
   font: inherit; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 7px 9px; width: 100%; box-sizing: border-box;
 }
 input[type=range] { width: 100%; accent-color: var(--region); touch-action: none; } /* drags are handled in script (iOS) */
-.krow { display: grid; grid-template-columns: 1fr 64px; gap: 8px; align-items: center; }
+.krow { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
 .search { position: relative; }
 .sugg { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; background: #fff; border: 1px solid var(--rule); border-top: none; border-radius: 0 0 4px 4px; max-height: 260px; overflow: auto; }
 .sugg button { display: flex; width: 100%; justify-content: space-between; gap: 8px; border: none; background: none; padding: 7px 9px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
@@ -188,6 +188,29 @@ input[type=range] { width: 100%; accent-color: var(--region); touch-action: none
 .log time { font-family: var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .sub { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 8px; }
+/* top-level sections (fold one by one) and the small folds inside them */
+details.sec { border-top: 1px solid var(--rule); padding-top: 10px; }
+details.sec[open] { display: grid; gap: 8px; }
+details.sec > summary { cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: var(--ink); display: flex; align-items: baseline; gap: 8px; }
+details.sec > summary output { font-size: 12px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+details.sec[open] > summary { margin-bottom: 2px; }
+details.sec > summary { list-style: none; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: "▸"; color: var(--muted); font-weight: 400; width: 0.9em; }
+details.sec[open] > summary::before { content: "▾"; }
+details.sub2 { display: grid; gap: 6px; }
+details.sub2 > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+details.sub2[open] { gap: 8px; }
+.check.off { opacity: 0.45; }
+/* one-tap choices standing in for a <select> */
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: #fff; }
+.seg button { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px; color: var(--ink); background: none; border: none; border-left: 1px solid var(--rule); padding: 7px 4px; cursor: pointer; white-space: nowrap; }
+.seg button:first-child { border-left: none; }
+.seg button.on { background: var(--region); color: #fff; font-weight: 700; }
+.kstep { display: grid; grid-template-columns: 34px 52px 34px; gap: 4px; align-items: center; }
+.kstep .btn { padding: 5px 0; font-size: 15px; line-height: 1; }
+.kstep input { text-align: center; padding: 6px 2px; font-family: var(--font-data); font-size: 15px; color: var(--region); -moz-appearance: textfield; }
+.kstep input::-webkit-inner-spin-button, .kstep input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 /* base map: faded toward the paper colour and/or desaturated (the railway overlay is not affected) */
 .leaflet-container { background: var(--paper); }
 .base-tiles { filter: opacity(var(--base-op, 1)) saturate(var(--base-sat, 1)); } /* not "opacity": Leaflet sets it inline */
@@ -232,201 +255,231 @@ details.sub[open] > summary { margin-bottom: 4px; }
   </div>
 
   <div class="field search">
-    <label class="label" for="q">駅</label>
-    <input type="text" id="q" placeholder="駅名・よみで検索（地図の駅をクリックでも可）" autocomplete="off">
+    <label class="label" for="q">駅指定</label>
+    <input type="text" id="q" placeholder="駅名・よみで検索（地図の駅をタップでも可）" autocomplete="off">
     <div class="sugg" id="sugg" hidden></div>
   </div>
 
   <div class="field">
-    <div class="label"><label for="kr">レーダー k 個以内</label><output id="kout">18</output></div>
+    <label class="label" for="kn">レーダー最大駅数</label>
     <div class="krow">
-      <input type="range" id="kr" min="1" max="100" value="18" aria-label="k（スライダー）">
-      <input type="number" id="kn" min="1" max="500" value="18" aria-label="k（数値）">
+      <input type="range" id="kr" min="1" max="18" value="18" aria-label="レーダー最大駅数（スライダー、18 まで）">
+      <div class="kstep">
+        <button class="btn" id="kMinus" type="button" aria-label="1 減らす">−</button>
+        <input type="number" id="kn" min="1" max="500" value="18" inputmode="numeric" aria-label="レーダー最大駅数">
+        <button class="btn" id="kPlus" type="button" aria-label="1 増やす">＋</button>
+      </div>
     </div>
-    <label class="check"><input type="checkbox" id="triple"> 三重表示：選んだ駅を取れる範囲を k・k−2・k−6 の 3 つ重ねて描く</label>
-  </div>
-
-  <div class="field">
-    <label class="check"><input type="checkbox" id="vor1"> 最寄り駅の境界を常に描く（1 次ボロノイ図・位置登録される駅の範囲）</label>
-    <label class="check sub-check"><input type="checkbox" id="vorNames"> 最寄り駅の境界に沿って、線の向こうの駅名を書く（ズーム 13 以上。画面に見えていない駅だけ）</label>
-    <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示（ある程度拡大したとき。未取得駅はより広い範囲でも）</label>
-    <label class="check"><input type="checkbox" id="levels"> 1〜k 位の境界を等高線のように重ねる</label>
-    <label class="check"><input type="checkbox" id="viewAll"> 表示中の全駅の境界を描く（k 次ボロノイ図）</label>
-    <div class="krow" style="grid-template-columns: 1fr auto">
-      <label class="note" for="bndZoom">上の 2 つの境界を描くのは（縮小時に描かないと軽くなります）</label>
-      <select id="bndZoom" style="width:auto">
-        <option value="0">いつでも</option>
-        <option value="9">ズーム 9 以上</option>
-        <option value="10" selected>ズーム 10 以上</option>
-        <option value="11">ズーム 11 以上</option>
-        <option value="12">ズーム 12 以上</option>
-      </select>
-    </div>
-    <label class="check"><input type="checkbox" id="showClosed" checked> 廃駅も含める</label>
   </div>
 
   <div class="sel" id="selbox"></div>
 
-  <div class="sub" id="grpSec">
-    <div class="label">複数駅の重なり（全部の駅がレーダー k 位以内に入る地域）</div>
-    <label class="check"><input type="checkbox" id="grpMode"> 複数選択モード：地図の駅をタップしてグループに追加・削除（地図右の <b>⧉</b> ボタンでも切り替え）</label>
+  <details class="sec" data-sec="disp">
+    <summary>表示</summary>
+    <label class="check"><input type="checkbox" id="showNames" checked> 駅名を表示</label>
+    <label class="check"><input type="checkbox" id="vor1"> 隣接駅間の境界線を表示</label>
+    <label class="check sub-check" data-dep="vor1"><input type="checkbox" id="vorNames"> 境界線に駅名を表示</label>
+    <label class="check"><input type="checkbox" id="levels"> 選択駅の順位の等高線を表示</label>
+    <label class="check"><input type="checkbox" id="viewAll"> レーダー対象駅が不変の最小セル境界を表示</label>
+    <div class="field">
+      <div class="label">境界線を描くズーム（隣接駅間・最小セル。縮小時に描かないと軽くなります）</div>
+      <select id="bndZoom" aria-label="境界線を描くズーム">
+        <option value="0" data-s="常時">いつでも</option>
+        <option value="9" data-s="9〜">ズーム 9 以上</option>
+        <option value="10" data-s="10〜" selected>ズーム 10 以上</option>
+        <option value="11" data-s="11〜">ズーム 11 以上</option>
+        <option value="12" data-s="12〜">ズーム 12 以上</option>
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" id="nearOn"> 最寄り駅名を常に表示</label>
+    <label class="check"><input type="checkbox" id="hideClosed"> 廃駅を隠す</label>
+    <label class="check"><input type="checkbox" id="uaHi" checked> 未取得駅を強調表示</label>
+    <label class="check sub-check" data-dep="uaHi"><input type="checkbox" id="uaFill"> 未取得駅を取れる範囲を塗る（位置登録で取れる範囲は濃く）</label>
+    <label class="check"><input type="checkbox" id="triple"> ブースター・特殊スキルの要否を明示</label>
+    <label class="check"><input type="checkbox" id="radarMarks"> レーダーで取れる駅をマーク</label>
+    <label class="check sub-check" data-dep="radarMarks"><input type="checkbox" id="stnMarks"> オモイダースで取れる駅もマーク</label>
+    <label class="check"><input type="checkbox" id="autoZoom"> オートズームを許可する</label>
+  </details>
+
+  <details class="sec" data-sec="grp" id="grpSec">
+    <summary>複数駅の重なり</summary>
+    <div class="note">全部の駅がレーダーに入る地域を表示します（整理は保留中）。</div>
+    <label class="check"><input type="checkbox" id="grpMode"> 複数選択モード：地図の駅をタップしてグループに追加・削除（地図の <b>⧉</b> ボタンでも切り替え）</label>
     <div class="chips" id="grpList"></div>
     <div class="note" id="grpInfo"></div>
     <div class="row"><button class="btn" id="grpClear">グループを空にする</button></div>
     <label class="check"><input type="checkbox" id="nGrp" checked> 現在地・指定位置が重なりの地域に出入りしたら通知</label>
-  </div>
+  </details>
 
-  <div class="sub" id="uaSec">
-    <div class="label">未取得駅<output id="uaCount" style="font-size:13px"></output></div>
-    <div class="row">
-      <button class="btn" id="uaImport">CSV を読み込む</button>
-      <button class="btn" id="uaExport">CSV に書き出す</button>
-      <button class="btn" id="uaClear">すべて消す</button>
-      <input type="file" id="uaFile" accept=".csv,text/csv" hidden>
-    </div>
-    <div class="note">「駅名」の列がある CSV を読み込みます（「メモ本文」の列があれば ❌ の行だけを未取得とみなします）。「CSV に書き出す」で保存したものも読み込めます。タップで<b>選んだ駅を長押し</b>（PC では右クリック）すると、取得済み／未取得を切り替えられます（選んでいない駅の長押しは指定位置になります。切り替えた直後は「元に戻す」で取り消せます）。データはこのブラウザの中にだけ保存します。</div>
-    <div class="note" id="uaInfo"></div>
-    <label class="check"><input type="checkbox" id="uaArea1"> 未取得駅を位置登録で取れる範囲を塗る（最寄り駅になる範囲）</label>
-    <label class="check"><input type="checkbox" id="uaAreaK"> 未取得駅をレーダーで取れる範囲を塗る（k 位以内に入る範囲）</label>
-    <label class="check"><input type="checkbox" id="nUa" checked> 未取得駅がレーダーに入ったら通知</label>
+  <details class="sec" data-sec="notif">
+    <summary>通知</summary>
+    <div class="row"><button class="btn" id="notifPerm">端末の通知を許可する</button></div>
+    <label class="check"><input type="checkbox" id="nNear" checked> 最寄り駅が変わったら通知</label>
+    <label class="check"><input type="checkbox" id="nSet"> 最遠駅の脱落時に通知</label>
+    <label class="check"><input type="checkbox" id="nSel" checked> 選択駅のエリアに出入りしたら通知</label>
+    <label class="check"><input type="checkbox" id="nUa" checked> 未取得駅がレーダー範囲に入ったら通知</label>
+  </details>
+
+  <details class="sec" data-sec="geo">
+    <summary>位置情報</summary>
+    <label class="check"><input type="checkbox" id="geoUse"> 位置情報を現在地として利用する</label>
     <div class="field">
-      <label class="label" for="uaSort">一覧の並び</label>
-      <select id="uaSort">
-        <option value="near" selected>近い順（現在地、なければ地図の中心から）</option>
-        <option value="pref">都道府県順</option>
+      <div class="label">位置情報の更新頻度</div>
+      <select id="geoRate" aria-label="位置情報の更新頻度">
+        <option value="0" data-s="最速" selected>最速（新しい位置が届くたび）</option>
+        <option value="3" data-s="3 秒">3 秒ごと</option>
+        <option value="10" data-s="10 秒">10 秒ごと</option>
+        <option value="30" data-s="30 秒">30 秒ごと</option>
       </select>
     </div>
-    <ol class="ualist" id="uaList"></ol>
-  </div>
-
-  <div class="geo">
-    <div class="label">現在地と通知</div>
-    <label class="check"><input type="checkbox" id="geoUse"> 現在地を使う</label>
     <label class="check"><input type="checkbox" id="geoFollow" checked> 現在地を常に地図の中心に保つ</label>
     <div class="field">
-      <label class="label" for="followPause">中心に保っているときに手で地図を動かしたら</label>
-      <select id="followPause">
-        <option value="0">すぐ現在地に戻す（止めない）</option>
-        <option value="5">5 秒止めてから戻す</option>
-        <option value="15" selected>15 秒止めてから戻す</option>
-        <option value="30">30 秒止めてから戻す</option>
-        <option value="off">追従をやめる（ボタンで再開）</option>
+      <div class="label">手動スクロール時の動作</div>
+      <select id="followPause" aria-label="手動スクロール時の動作">
+        <option value="0" data-s="すぐ戻す">すぐ現在地に戻す（止めない）</option>
+        <option value="5" data-s="5 秒">5 秒止めてから戻す</option>
+        <option value="15" data-s="15 秒" selected>15 秒止めてから戻す</option>
+        <option value="30" data-s="30 秒">30 秒止めてから戻す</option>
+        <option value="off" data-s="追従オフ">追従をやめる（ボタンで再開）</option>
       </select>
     </div>
-    <div class="row"><button class="btn" id="geoCenter">いますぐ現在地を中心に</button></div>
-    <div class="note">地図右上の 3 つのボタン（上から：現在地を使う／常に中心に保つ／いますぐ中心に）でも同じ操作ができます。</div>
-    <div class="field">
-      <label class="label" for="geoRate">位置の更新</label>
-      <select id="geoRate">
-        <option value="0" selected>最速（新しい位置が届くたび）</option>
-        <option value="3">3 秒ごと</option>
-        <option value="10">10 秒ごと</option>
-        <option value="30">30 秒ごと</option>
-      </select>
-    </div>
-    <label class="check"><input type="checkbox" id="autoZoom"> 現在地を使い始めたとき自動で拡大する（オフならズームはそのまま）</label>
-    <label class="check"><input type="checkbox" id="nNear" checked> 最寄り駅が変わったら通知</label>
-    <label class="check"><input type="checkbox" id="nSet"> レーダー k 駅の顔ぶれが変わったら通知</label>
-    <label class="check"><input type="checkbox" id="nSel" checked> 選んだ駅の圏内に出入りしたら通知</label>
-    <div class="row"><button class="btn" id="notifPerm">端末の通知を許可する</button></div>
-    <label class="check"><input type="checkbox" id="nearOn"> 最寄り駅を画面の隅に常に表示する</label>
-    <label class="check"><input type="checkbox" id="radarMarks"> 現在地・指定位置からレーダーに入る k 駅に順位の番号を付ける</label>
-    <label class="check" style="margin-left:22px"><input type="checkbox" id="stnMarks"> 位置登録した駅から数えた k 駅のうち、上に入らない駅も示す（四角い番号）</label>
-    <div class="note">指定位置：地図を長押し（PC は右クリック）した地点（選んでいる駅の上を除く）。三重表示がオンのときは、番号の色を k−6 位まで・k−2 位まで・k 位までの 3 段階に分けます。</div>
+    <div class="note">指定位置：地図を長押し（PC は右クリック）した地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
     <div class="status" id="geoStatus">現在地は使っていません。</div>
     <ol class="radar" id="radarList" hidden></ol>
     <ol class="log" id="log" aria-live="polite"></ol>
-  </div>
-
-  <div class="sub">
-    <div class="label">地図の見た目</div>
-    <div class="field">
-      <label class="label" for="baseMap">背景の地図</label>
-      <select id="baseMap">
-        <option value="osm" selected>OpenStreetMap</option>
-        <option value="gsiPale">地理院 淡色地図</option>
-        <option value="gsiStd">地理院 標準地図</option>
-      </select>
-    </div>
-    <div class="field">
-      <label class="label" for="compactMode">コンパクト表示（スマホ。ボタン類を小さく・減らす）</label>
-      <select id="compactMode">
-        <option value="auto" selected>自動（画面の高さが低いとき。画面分割など）</option>
-        <option value="on">オン</option>
-        <option value="off">オフ</option>
-      </select>
-    </div>
-    <div class="field">
-      <label class="label" for="railMode">鉄道の線</label>
-      <select id="railMode">
-        <option value="off" selected>表示しない</option>
-        <option value="color">ラインカラーで描く</option>
-        <option value="mono">1 色で描く</option>
-        <option value="orm">OpenRailwayMap（駅名・橋梁なども入った画像）</option>
-      </select>
-    </div>
-    <div class="sty" id="railStyle" hidden>
-      <div class="ctl" style="grid-template-columns: auto 34px auto 74px">
-        <span class="note">色</span>
-        <input type="color" id="railColor" value="#0f766e" aria-label="鉄道の線の色（1 色のとき）" title="1 色で描くときの色">
-        <span class="note">太さ</span>
-        <select id="railW" aria-label="鉄道の線の太さ"><option value="1">1 px</option><option value="1.5">1.5 px</option><option value="2" selected>2 px</option><option value="3">3 px</option><option value="4">4 px</option></select>
-      </div>
-      <div class="label"><label for="railOp">線の濃さ</label><output id="railOpOut">100%</output></div>
-      <input type="range" id="railOp" min="0.2" max="1" step="0.05" value="1">
-      <div class="note">色はラインカラーで描くときは使いません（ラインカラーのない路線は灰色）。</div>
-    </div>
-    <div class="field">
-      <div class="label"><label for="baseFade">背景の薄さ</label><output id="baseFadeOut">0%</output></div>
-      <input type="range" id="baseFade" min="0" max="80" step="5" value="0">
-    </div>
-    <div class="field">
-      <div class="label"><label for="baseSat">背景の色の鮮やかさ</label><output id="baseSatOut">100%</output></div>
-      <input type="range" id="baseSat" min="0" max="100" step="10" value="100">
-    </div>
-  </div>
-
-  <div class="sub">
-    <div class="label">オフライン（電波のない所で使う）</div>
-    <div class="note" id="offInfo">一度開くと、このページと路線データが端末に保存され、電波がなくても開けます（現在地は GPS で使えます）。背景の地図は「地理院 淡色／標準」で見た範囲だけ保存します（最大 3,000 枚、30 日で更新。OpenStreetMap は保存しません）。機内などで使う場合は、出発前に地理院の地図で行き先や経路を一度表示しておいてください。</div>
-    <div class="row"><span class="note" id="offCount"></span><button class="btn" id="offClear">保存した地図を消す</button></div>
-  </div>
-
-  <details class="sub" id="styleSec">
-    <summary>線の見た目（色・太さ・濃さ・線の種類）</summary>
-    <div id="styleBox" style="display:grid;gap:10px"></div>
-    <div><button class="btn" id="styleReset">既定に戻す</button></div>
   </details>
 
-  <div class="sub">
-    <div class="label">計算の設定</div>
+  <details class="sec" data-sec="map">
+    <summary>マップ</summary>
     <div class="field">
-      <label class="label" for="metric">距離の測り方</label>
-      <select id="metric">
-        <option value="flat" selected>緯度・経度をそのまま平面とみなす</option>
-        <option value="cos">平面・経度を cos 36° で縮める</option>
-        <option value="sphere">球面（大圏距離）</option>
+      <div class="label">ベースマップ</div>
+      <select id="baseMap" aria-label="ベースマップ">
+        <option value="osm" data-s="OSM" selected>OpenStreetMap</option>
+        <option value="gsiPale" data-s="地理院 淡色">地理院 淡色地図</option>
+        <option value="gsiStd" data-s="地理院 標準">地理院 標準地図</option>
       </select>
     </div>
+    <details class="sub2">
+      <summary>彩度・不透明度</summary>
+      <div class="field">
+        <div class="label"><label for="baseSat">彩度</label><output id="baseSatOut">100%</output></div>
+        <input type="range" id="baseSat" min="0" max="100" step="10" value="100">
+      </div>
+      <div class="field">
+        <div class="label"><label for="baseOp">不透明度</label><output id="baseOpOut">100%</output></div>
+        <input type="range" id="baseOp" min="20" max="100" step="5" value="100">
+      </div>
+    </details>
+    <details class="sub2" id="styleSec">
+      <summary>境界線の表示設定（色・太さ・不透明度・線種）</summary>
+      <div id="styleBox" style="display:grid;gap:10px"></div>
+      <div><button class="btn" id="styleReset">既定に戻す</button></div>
+    </details>
     <div class="field">
-      <label class="label" for="clip">計算範囲（駅からの四角い窓）</label>
-      <select id="clip">
-        <option value="1">±1°（約100 km）</option>
-        <option value="3" selected>±3°（約300 km）</option>
-        <option value="10">±10°</option>
-        <option value="0">全国の枠（遅くなります）</option>
+      <div class="label">鉄道路線</div>
+      <select id="railMode" aria-label="鉄道路線">
+        <option value="off" data-s="なし" selected>表示しない</option>
+        <option value="color" data-s="ラインカラー">ラインカラーで描く</option>
+        <option value="mono" data-s="指定色">1 色で描く</option>
+        <option value="orm" data-s="ORM">OpenRailwayMap</option>
       </select>
+      <div class="note">ORM＝OpenRailwayMap（駅名・橋梁なども入った画像）</div>
     </div>
-  </div>
+    <details class="sub2" id="railStyle">
+      <summary>色・太さ・不透明度</summary>
+      <div class="sty">
+        <div class="ctl" style="grid-template-columns: auto 34px auto 74px">
+          <span class="note">色</span>
+          <input type="color" id="railColor" value="#0f766e" aria-label="鉄道路線の色（指定色のとき）" title="指定色で描くときの色">
+          <span class="note">太さ</span>
+          <select id="railW" aria-label="鉄道路線の太さ"><option value="1">1 px</option><option value="1.5">1.5 px</option><option value="2" selected>2 px</option><option value="3">3 px</option><option value="4">4 px</option></select>
+        </div>
+        <div class="label"><label for="railOp">不透明度</label><output id="railOpOut">100%</output></div>
+        <input type="range" id="railOp" min="0.2" max="1" step="0.05" value="1">
+        <div class="note">色は指定色で描くときだけ使います（ラインカラーのない路線は灰色）。</div>
+      </div>
+    </details>
+  </details>
 
-  <div class="sub">
+  <details class="sec" data-sec="ua" id="uaSec">
+    <summary>未取得駅<output id="uaCount"></output></summary>
+    <div class="row">
+      <button class="btn" id="uaImport">読み込む</button>
+      <button class="btn" id="uaExport">書き出す</button>
+      <button class="btn" id="uaClear">すべて消す</button>
+      <input type="file" id="uaFile" accept=".csv,text/csv" hidden>
+    </div>
+    <details class="sub2">
+      <summary>使い方</summary>
+      <div class="note">「駅名」の列がある CSV を読み込みます（「メモ本文」の列があれば ❌ の行だけを未取得とみなします）。「書き出す」で保存した CSV も読み込めます。タップで<b>選んだ駅を長押し</b>（PC では右クリック）すると、取得済み／未取得を切り替えられます（選んでいない駅の長押しは指定位置になります。切り替えた直後は「元に戻す」で取り消せます）。データはこのブラウザの中にだけ保存します。</div>
+    </details>
+    <div class="note" id="uaInfo"></div>
+    <div class="field">
+      <div class="label">一覧の並び</div>
+      <select id="uaSort" aria-label="一覧の並び">
+        <option value="near" data-s="近い順" selected>近い順（現在地、なければ地図の中心から）</option>
+        <option value="pref" data-s="都道府県順">都道府県順</option>
+      </select>
+    </div>
+    <details class="sub2" id="uaListSec">
+      <summary>未取得駅の一覧</summary>
+      <ol class="ualist" id="uaList"></ol>
+    </details>
+  </details>
+
+  <details class="sec" data-sec="ui">
+    <summary>インタフェース</summary>
+    <div class="field">
+      <div class="label">コンパクト表示（スマホ。ボタン類を小さく・減らす）</div>
+      <select id="compactMode" aria-label="コンパクト表示">
+        <option value="auto" data-s="自動" selected>自動（画面の高さが低いとき。画面分割など）</option>
+        <option value="on" data-s="オン">オン</option>
+        <option value="off" data-s="オフ">オフ</option>
+      </select>
+      <div class="note">自動：画面の高さが低いとき（画面分割など）にコンパクトにします。</div>
+    </div>
+  </details>
+
+  <details class="sec" data-sec="off">
+    <summary>オフライン</summary>
+    <div class="note" id="offInfo">一度開くと、このページと路線データが端末に保存され、電波がなくても開けます（現在地は GPS で使えます）。背景の地図は「地理院 淡色／標準」で見た範囲だけ保存します（最大 3,000 枚、30 日で更新。OpenStreetMap は保存しません）。機内などで使う場合は、出発前に地理院の地図で行き先や経路を一度表示しておいてください。</div>
+    <div class="row"><span class="note" id="offCount"></span><button class="btn" id="offClear">保存した地図を消す</button></div>
+  </details>
+
+  <details class="sec" data-sec="calc">
+    <summary>計算設定</summary>
+    <div class="field">
+      <div class="label">距離の測り方</div>
+      <select id="metric" aria-label="距離の測り方">
+        <option value="flat" data-s="平面" selected>緯度・経度をそのまま平面とみなす</option>
+        <option value="cos" data-s="cos 36°">平面・経度を cos 36° で縮める</option>
+        <option value="sphere" data-s="球面">球面（大圏距離）</option>
+      </select>
+      <div class="note">平面：緯度・経度をそのまま平面とみなす（既定）。cos 36°：経度を cos 36° で縮める。球面：大圏距離。</div>
+    </div>
+    <div class="field">
+      <div class="label">計算範囲（駅からの四角い窓）</div>
+      <select id="clip" aria-label="計算範囲">
+        <option value="1" data-s="±1°">±1°（約100 km）</option>
+        <option value="3" data-s="±3°" selected>±3°（約300 km）</option>
+        <option value="10" data-s="±10°">±10°</option>
+        <option value="0" data-s="全国">全国の枠（遅くなります）</option>
+      </select>
+      <div class="note">±1° は約 100 km、±3° は約 300 km。全国の枠は遅くなります。</div>
+    </div>
+  </details>
+
+  <details class="sec" data-sec="reload">
+    <summary>リロード</summary>
     <div><button class="btn" id="reloadPage">ページを再読み込み</button></div>
     <div class="note">ホーム画面に追加（インストール）したアプリにはブラウザの再読み込みボタンがないため、ここから読み込み直せます。地図の位置と設定はそのまま戻ります。</div>
+  </details>
+
+  <details class="sec" data-sec="data">
+    <summary>駅データ更新</summary>
     <div class="note" id="datainfo"></div>
     <div><button class="btn" id="refresh">GitHub から最新データを取得</button></div>
-    <label class="check"><input type="checkbox" id="dbgRank"> デバッグ：地図の駅以外をクリックすると、その地点のレーダー順位を表示する</label>
-    <div class="note">指定位置：地図を右クリック（スマホでは長押し）すると、その地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
-  </div>
+  </details>
 </section>
 <button id="menuFab" class="menu-fab" aria-expanded="true" aria-label="メニューをたたむ"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
 
@@ -590,7 +643,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   function applyFilter(keepSel) {
     const prevId = st.sel >= 0 ? st.rows[st.sel][0] : null;
-    st.rows = $("showClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
+    st.rows = !$("hideClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
     const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
     st.idx = makeIndex(lat, lng);
     st.cache.clear(); st.lcache.clear(); st.gen++;
@@ -607,13 +660,15 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const fmtVer = (v) => /^\d{8}$/.test(v) ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6)}` : v;
 
   const isUa = (i) => st.ua.has(st.rows[i][2]);
+  // highlighting (colors, sizes, wide-range names, filled areas) can be switched off while keeping the list
+  const uaHi = () => st.ua.size > 0 && $("uaHi").checked;
   function stationStyle(i) {
-    const r = st.rows[i], ua = isUa(i), sel = i === st.sel;
+    const hi = uaHi(), r = st.rows[i], ua = hi && isUa(i), sel = i === st.sel;
     return {
       radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
       // with a list loaded, acquired stations recede: a pale solid color (not a translucent fill, which blurred the dots
       // and let the white rims of crowded dots read as rings)
-      fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : st.ua.size && !sel ? (r[6] ? "#c8ccd4" : "#eaa98b") : (r[6] ? "#9aa0ad" : "#c2410c"),
+      fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : hi && !sel ? (r[6] ? "#c8ccd4" : "#eaa98b") : (r[6] ? "#9aa0ad" : "#c2410c"),
       fillOpacity: 0.95,
     };
   }
@@ -719,7 +774,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
 
   // ---------------- line styles (per boundary kind; saved per browser)
   const STYLE_KINDS = [
-    ["sel", "選んだ駅の範囲"], ["vor", "最寄り駅の境界"], ["view", "全駅の境界（k 次）"], ["lv", "1〜k 位の境界"],
+    ["sel", "選択駅のエリア"], ["vor", "隣接駅間の境界線"], ["view", "最小セル境界"], ["lv", "順位の等高線"],
   ];
   const STYLE_DEFAULT = {
     sel: { color: "#1f5fa8", weight: 2, opacity: 1, dash: "solid" },
@@ -805,6 +860,12 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (worker) worker.postMessage({ ch, job: ++jobSeq, gen: st.gen, items: [] });
   }
 
+  // a station chosen by the user (tap, search, list): with auto zoom, fit its whole area, else just center it
+  function pick(i) {
+    const fit = $("autoZoom").checked;
+    select(i, fit);
+    if (!fit) centerOn(st.rows[i][4], st.rows[i][5]);
+  }
   function select(i, fly) {
     st.sel = i;
     if (i < 0) return;
@@ -890,10 +951,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const ctx = nameCtx; ctx.setTransform(dpr, 0, 0, dpr, off.x * dpr, off.y * dpr); ctx.clearRect(-off.x, -off.y, size.x, size.y);
     if (!$("showNames").checked || !st.rows.length) return;
     const z = map.getZoom(), b = map.getBounds().pad(NAME_PAD + 0.02), all = [], ua = [];
-    const wantAll = z >= NAME_MIN_ZOOM, wantUa = z >= UA_NAME_MIN_ZOOM && st.ua.size > 0;
+    const hiUa = uaHi(), wantAll = z >= NAME_MIN_ZOOM, wantUa = z >= UA_NAME_MIN_ZOOM && hiUa;
     if (wantAll || wantUa) for (let i = 0; i < st.rows.length; i++) {
       if (i === st.sel || !b.contains([st.rows[i][4], st.rows[i][5]])) continue;
-      if (isUa(i)) { if (wantUa) ua.push(i); } else if (wantAll) all.push(i);
+      if (hiUa && isUa(i)) { if (wantUa) ua.push(i); } else if (wantAll) all.push(i);
     }
     if (all.length + ua.length > NAME_MAX) all.length = 0; // too crowded to read: keep only unacquired / selected
     if (ua.length > UA_NAME_MAX) {
@@ -1208,7 +1269,6 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   $("geoUse").addEventListener("change", () => $("geoUse").checked ? startGeo() : stopGeo());
   $("geoFollow").addEventListener("change", () => setFollow($("geoFollow").checked));
-  $("geoCenter").addEventListener("click", jumpToMe);
   // map buttons: [use location / follow] [jump to current position]
   const ICON_USE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 22s7-6.6 7-12.2A7 7 0 0 0 5 9.8C5 15.4 12 22 12 22z"/><circle cx="12" cy="9.8" r="2.6" fill="currentColor"/></svg>';
   const ICON_FOLLOW = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3 3 10.5l7.5 2.9L13.4 21z"/></svg>';
@@ -1524,31 +1584,11 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   map.on("moveend", () => { if ($("vor1").checked && !coveredBy(st.vorDrawn)) drawVor(); });
 
-  // ---------------- ranking at a clicked point
+  // ---------------- tap on the map
   map.on("click", (e) => {
     const hitI = hitStation(e.layerPoint);
     if (hitI >= 0 && $("grpMode").checked) { toggleGroup(hitI); return; } // multi-station mode: add / remove
-    if (hitI >= 0) { select(hitI, false); centerOn(st.rows[hitI][4], st.rows[hitI][5]); return; } // tap on a station
-    if (!$("dbgRank").checked) return; // debug tool, off by default
-    const { lat, lng } = e.latlng, n = st.rows.length;
-    const K = Math.max(st.k, 5), top = [];
-    let selKey = st.sel >= 0 ? distKey(st.idx, st.metric, lat, lng, st.sel) : null, selRank = 1;
-    for (let t = 0; t < n; t++) {
-      const d = distKey(st.idx, st.metric, lat, lng, t);
-      if (selKey !== null && t !== st.sel && d < selKey) selRank++;
-      if (top.length < K || d < top[top.length - 1][0]) {
-        let p = top.length < K ? top.length : K - 1;
-        if (top.length < K) top.push(null);
-        while (p > 0 && top[p - 1][0] > d) { top[p] = top[p - 1]; p--; }
-        top[p] = [d, t];
-      }
-    }
-    const items = top.slice(0, st.k).map(([, t], q) =>
-      `<li class="${t === st.sel ? "me" : ""}"><span class="n">${q + 1}</span><span>${esc(st.rows[t][2])}</span><span class="d">${km(lat, lng, st.rows[t][4], st.rows[t][5])}</span></li>`).join("");
-    const verdict = st.sel < 0 ? "" :
-      `<div class="verdict">${esc(st.rows[st.sel][2])} は <b>${selRank} 位</b>（${selRank <= st.k ? "レーダー圏内" : "圏外"}）</div>`;
-    L.popup({ maxWidth: 280 }).setLatLng(e.latlng)
-      .setContent(`<div class="rank"><h3>この地点のレーダー（上位 ${st.k}）</h3><ol>${items}</ol>${verdict}<div class="note">順位は「${METRIC_NAME[st.metric]}」で決め、km は実際の地表距離です。</div></div>`).openOn(map);
+    if (hitI >= 0) pick(hitI); // tap on a station
   });
 
   // ---------------- helpers
@@ -1586,17 +1626,20 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // ---------------- controls
   function setK(v) {
     v = Math.max(1, Math.min(500, Math.round(+v || 1)));
-    st.k = v; $("kout").textContent = v; $("kn").value = v; $("kr").value = Math.min(100, v);
+    st.k = v; $("kn").value = v; $("kr").value = Math.min(K_SLIDER_MAX, v);
     redraw(false);
     if (st.sel >= 0) try { history.replaceState(null, "", `#id=${st.rows[st.sel][0]}&k=${st.k}&m=${st.metric}`); } catch (e) {}
   }
-  $("kr").addEventListener("input", () => { $("kout").textContent = $("kr").value; $("kn").value = $("kr").value; st.k = +$("kr").value; redraw(false); });
+  const K_SLIDER_MAX = 18; // the game's radar tops out at 18; more (events) via the number field or − / ＋
+  $("kr").addEventListener("input", () => { $("kn").value = $("kr").value; st.k = +$("kr").value; redraw(false); });
+  $("kMinus").addEventListener("click", () => setK(st.k - 1));
+  $("kPlus").addEventListener("click", () => setK(st.k + 1));
   $("kn").addEventListener("change", () => setK($("kn").value));
   $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); drawVor(); });
   $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); drawVor(); });
   // ---------------- map look: base map, railway overlay, fading (kept in localStorage "mapLook")
   let lookRestoring = false; // while restoring, setBase() fires "baselayerchange" → lookSave() would overwrite the rest with defaults
-  const lookSave = () => { if (lookRestoring) return; try { localStorage.setItem("mapLook", JSON.stringify({ base: $("baseMap").value, rail: $("railMode").value, railColor: $("railColor").value, railW: $("railW").value, railOp: $("railOp").value, fade: +$("baseFade").value, sat: +$("baseSat").value })); } catch (e) {} };
+  const lookSave = () => { if (lookRestoring) return; try { localStorage.setItem("mapLook", JSON.stringify({ base: $("baseMap").value, rail: $("railMode").value, railColor: $("railColor").value, railW: $("railW").value, railOp: $("railOp").value, fade: 100 - +$("baseOp").value, sat: +$("baseSat").value })); } catch (e) {} };
   function setBase(key) {
     if (!BASES[key]) return;
     for (const [k, [, layer]] of Object.entries(BASES)) if (k !== key && map.hasLayer(layer)) map.removeLayer(layer);
@@ -1615,15 +1658,15 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     } else if (map.hasLayer(railR)) map.removeLayer(railR);
   }
   function applyFade() {
-    const f = +$("baseFade").value, s = +$("baseSat").value, c = map.getContainer();
+    const f = 100 - +$("baseOp").value, s = +$("baseSat").value, c = map.getContainer();
     c.style.setProperty("--base-op", String(1 - f / 100)); c.style.setProperty("--base-sat", String(s / 100));
-    $("baseFadeOut").textContent = f + "%"; $("baseSatOut").textContent = s + "%";
+    $("baseOpOut").textContent = (100 - f) + "%"; $("baseSatOut").textContent = s + "%";
   }
   $("baseMap").addEventListener("change", () => { setBase($("baseMap").value); lookSave(); });
   $("railMode").addEventListener("change", () => { setRail($("railMode").value); lookSave(); });
   const railOpShow = () => { $("railOpOut").textContent = Math.round(+$("railOp").value * 100) + "%"; };
   for (const id of ["railColor", "railW", "railOp"]) $(id).addEventListener("input", () => { railOpShow(); drawRail(); lookSave(); });
-  for (const id of ["baseFade", "baseSat"]) $(id).addEventListener("input", () => { applyFade(); lookSave(); });
+  for (const id of ["baseOp", "baseSat"]) $(id).addEventListener("input", () => { applyFade(); lookSave(); });
   // the layers control (top right) changes the same things
   map.on("baselayerchange", (e) => { const k = Object.keys(BASES).find(k => BASES[k][1] === e.layer); if (k) { $("baseMap").value = k; lookSave(); } });
   try {
@@ -1636,7 +1679,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       if (Number.isFinite(+m.railOp) && m.railOp) $("railOp").value = m.railOp;
       railOpShow();
       setRail(m.rail === true ? "orm" : m.rail === false ? "off" : m.rail); // true/false: the earlier on/off of OpenRailwayMap
-      if (Number.isFinite(m.fade)) $("baseFade").value = m.fade; if (Number.isFinite(m.sat)) $("baseSat").value = m.sat;
+      if (Number.isFinite(m.fade)) $("baseOp").value = 100 - m.fade; if (Number.isFinite(m.sat)) $("baseSat").value = m.sat;
     }
   } catch (e) {}
   lookRestoring = false;
@@ -1654,7 +1697,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   });
   $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
   $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; cancelAsync("view"); viewLayer.clearLayers(); } });
-  $("showClosed").addEventListener("change", () => applyFilter(true));
+  $("hideClosed").addEventListener("change", () => applyFilter(true));
   function setFolded(c) {
     $("panel").classList.toggle("collapsed", c); document.body.classList.toggle("folded", c);
     $("fold").querySelector(".fold-txt").textContent = c ? "ひらく" : "たたむ";
@@ -1740,7 +1783,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   });
   $("sugg").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    $("sugg").hidden = true; select(+b.dataset.i, true);
+    $("sugg").hidden = true; pick(+b.dataset.i);
   });
   $("q").addEventListener("keydown", (e) => {
     const btns = [...$("sugg").querySelectorAll("button")];
@@ -1749,7 +1792,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       suggOn = (suggOn + (e.key === "ArrowDown" ? 1 : -1) + btns.length) % btns.length;
       btns.forEach((b, j) => b.classList.toggle("on", j === suggOn));
     } else if (e.key === "Enter") {
-      const b = btns[Math.max(0, suggOn)]; if (b) { $("sugg").hidden = true; select(+b.dataset.i, true); }
+      const b = btns[Math.max(0, suggOn)]; if (b) { $("sugg").hidden = true; pick(+b.dataset.i); }
     } else if (e.key === "Escape") $("sugg").hidden = true;
   });
   document.addEventListener("click", (e) => { if (!e.target.closest(".search")) $("sugg").hidden = true; });
@@ -1819,6 +1862,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (track.pos) evaluate(false);
   }
   function renderUaList() {
+    if (!$("uaListSec").open) return; // folded (the default): not built at all (lightness; thousands of rows)
     const ids = [];
     st.rows.forEach((r, i) => { if (st.ua.has(r[2])) ids.push(i); });
     let from = null;
@@ -1837,15 +1881,17 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   $("uaList").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    const i = +b.dataset.i; select(i, false); centerOn(st.rows[i][4], st.rows[i][5]);
+    pick(+b.dataset.i);
   });
   $("uaSort").addEventListener("change", renderUaList);
-  map.on("moveend", () => { if (!track.pos && $("uaSort").value === "near" && st.ua.size && !$("panel").classList.contains("collapsed")) renderUaList(); });
+  $("uaListSec").addEventListener("toggle", () => { if ($("uaListSec").open) renderUaList(); });
+  map.on("moveend", () => { if (!track.pos && $("uaSort").value === "near" && st.ua.size && !$("panel").classList.contains("collapsed") && $("uaListSec").open) renderUaList(); });
   $("selbox").addEventListener("click", (e) => { if (e.target.id === "uaToggleSel" && st.sel >= 0) toggleUa(st.sel); });
   // filled areas: union of R_1 (位置登録) / R_k (レーダー) over all unacquired stations (async, cached per station)
   function drawUaAreas() {
     const job = ++st.uaJob; uaLayer1.clearLayers(); uaLayerK.clearLayers();
-    const want1 = $("uaArea1").checked, wantK = $("uaAreaK").checked;
+    // one switch for both; the 位置登録 area (R_1) is drawn darker on top of the レーダー one (R_k)
+    const want1 = uaHi() && $("uaFill").checked, wantK = want1;
     if (!want1) cancelAsync("ua1"); if (!wantK) cancelAsync("uaK");
     if (!st.ua.size || !(want1 || wantK)) return;
     const ids = []; st.rows.forEach((r, i) => { if (st.ua.has(r[2])) ids.push(i); });
@@ -1854,8 +1900,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (want1) regionsAsync("ua1", ids.map(i => [i, 1]), add(uaLayer1, uaR1));
     if (wantK) regionsAsync("uaK", ids.map(i => [i, st.k]), add(uaLayerK, uaRK));
   }
-  $("uaArea1").addEventListener("change", drawUaAreas);
-  $("uaAreaK").addEventListener("change", drawUaAreas);
+  const uaOptsSave = () => { try { localStorage.setItem("uaOpts", JSON.stringify({ hi: $("uaHi").checked, fill: $("uaFill").checked })); } catch (e) {} };
+  $("uaFill").addEventListener("change", () => { uaOptsSave(); drawUaAreas(); });
+  $("uaHi").addEventListener("change", () => { uaOptsSave(); drawStations(); updateLabels(); drawUaAreas(); });
+  try { const o = JSON.parse(localStorage.getItem("uaOpts") || "null"); if (o) { $("uaHi").checked = o.hi !== false; $("uaFill").checked = !!o.fill; } } catch (e) {}
   // import / export / clear
   $("uaImport").addEventListener("click", () => $("uaFile").click());
   $("uaFile").addEventListener("change", async () => {
@@ -1902,7 +1950,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       return `<div class="sty" data-k="${k}"><div>${name}</div><div class="ctl">` +
         `<input type="color" data-p="color" value="${s.color}" aria-label="${name}の色">` +
         `<select data-p="weight" aria-label="${name}の太さ">${W.map(w => `<option value="${w}"${+s.weight === w ? " selected" : ""}>${w} px</option>`).join("")}</select>` +
-        `<input type="range" data-p="opacity" min="0.05" max="1" step="0.05" value="${s.opacity}" aria-label="${name}の濃さ" title="濃さ">` +
+        `<input type="range" data-p="opacity" min="0.05" max="1" step="0.05" value="${s.opacity}" aria-label="${name}の不透明度" title="不透明度">` +
         `<select data-p="dash" aria-label="${name}の線の種類">` +
         [["solid", "実線"], ["dashed", "破線"], ["dotted", "点線"]].map(([v, t]) => `<option value="${v}"${s.dash === v ? " selected" : ""}>${t}</option>`).join("") +
         `</select></div></div>`;
@@ -1972,13 +2020,51 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   let offTimer = 0;
   for (const [, layer] of Object.values(BASES)) layer.on("load", () => { clearTimeout(offTimer); offTimer = setTimeout(() => { if (!$("panel").classList.contains("collapsed")) offCount(); }, 800); });
 
+  // ---------------- panel: one-tap choices, folding sections, dependent switches
+  // A <select> with a few choices becomes a row of buttons acting like radio buttons (user: settings should switch with
+  // one tap; a pull-down only where unavoidable). The <select> stays (hidden) as the source of truth, so the existing
+  // code keeps reading / writing .value; writes are mirrored onto the buttons through an instance-level setter.
+  const SEL_VALUE = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+  function segmentize(sel) {
+    const box = document.createElement("div"); box.className = "seg"; box.setAttribute("role", "radiogroup");
+    box.setAttribute("aria-label", sel.getAttribute("aria-label") || "");
+    const btns = [...sel.options].map((o) => {
+      const b = document.createElement("button"); b.type = "button"; b.dataset.v = o.value; b.setAttribute("role", "radio");
+      b.textContent = o.dataset.s || o.textContent; if (o.dataset.s) b.title = o.textContent;
+      b.addEventListener("click", () => { if (sel.value !== o.value) { sel.value = o.value; sel.dispatchEvent(new Event("change")); } });
+      box.appendChild(b); return b;
+    });
+    const sync = () => { const v = SEL_VALUE.get.call(sel); for (const b of btns) { const on = b.dataset.v === v; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); } };
+    Object.defineProperty(sel, "value", { configurable: true, get() { return SEL_VALUE.get.call(this); }, set(v) { SEL_VALUE.set.call(this, v); sync(); } });
+    sel.addEventListener("change", sync);
+    sel.hidden = true; sel.after(box); sync();
+  }
+  for (const id of ["bndZoom", "geoRate", "followPause", "baseMap", "railMode", "uaSort", "compactMode", "metric", "clip"]) segmentize($(id));
+  // sections fold one by one; which are open is remembered (first visit: only 表示)
+  const secs = [...document.querySelectorAll("#panel details.sec")];
+  try {
+    const o = JSON.parse(localStorage.getItem("panelSecs") || "null");
+    for (const d of secs) d.open = o && typeof o[d.dataset.sec] === "boolean" ? o[d.dataset.sec] : d.dataset.sec === "disp";
+  } catch (e) { for (const d of secs) d.open = d.dataset.sec === "disp"; }
+  for (const d of secs) d.addEventListener("toggle", () => {
+    try { localStorage.setItem("panelSecs", JSON.stringify(Object.fromEntries(secs.map(x => [x.dataset.sec, x.open])))); } catch (e) {}
+  });
+  // a nested switch works only while its parent is on: shown greyed out (kept as set) otherwise
+  function updateDeps() {
+    for (const l of document.querySelectorAll("#panel [data-dep]")) {
+      const off = !$(l.dataset.dep).checked; l.classList.toggle("off", off);
+      const c = l.querySelector("input"); if (c) c.disabled = off;
+    }
+  }
+  $("panel").addEventListener("change", updateDeps);
+
   // ---------------- boot (restore #id=..&k=..&m=.. if present)
   // read the saved view first: the moves made while booting would overwrite it
   let savedView = null;
   try { const v = JSON.parse(localStorage.getItem("view") || "null"); if (Array.isArray(v) && v.length === 3 && v.every(Number.isFinite)) savedView = v; } catch (e) {}
   st.bootView = !!savedView; // while booting, selecting a station must not fly away from the saved view
   const hp = new URLSearchParams(location.hash.slice(1));
-  if (hp.get("k")) { st.k = Math.max(1, Math.min(500, +hp.get("k") || 18)); $("kn").value = st.k; $("kr").value = Math.min(100, st.k); $("kout").textContent = st.k; }
+  if (hp.get("k")) { st.k = Math.max(1, Math.min(500, +hp.get("k") || 18)); $("kn").value = st.k; $("kr").value = Math.min(18, st.k); }
   if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
   try {
     $("vor1").checked = localStorage.getItem("vor1") === "1";
@@ -1990,7 +2076,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
   } catch (e) {}
-  geoCtl.update();
+  geoCtl.update(); updateDeps();
   buildStyleBox();
   loadUa();
   loadRows(EMBED.rows, EMBED.version);
