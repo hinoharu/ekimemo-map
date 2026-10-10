@@ -1304,7 +1304,18 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (d) d.classList.toggle("off", !!real && (!geoOn() || age >= STALE_MS));
     const a = d && d.querySelector(".age"); if (a) a.textContent = real && age >= STALE_MS ? fmtAge(age) : "";
   }
-  setInterval(() => { if (track.pos) meDotState(); }, 10000);
+  // a dead watch: after the device's location was switched off and on, Android's Chrome may never deliver again on the
+  // same watchPosition. While the location is old, the watch is made anew every 30 s, and at once when the app is
+  // brought back to the front (user: the marker stayed grey)
+  function reviveGeo(force) {
+    if (!geoOn() || posAge() < STALE_MS && track.lastSeen) return;
+    const now = Date.now(); if (!force && now - (track.revived || 0) < 30000) return;
+    track.revived = now;
+    navigator.geolocation.clearWatch(track.watch); track.precise = false; watchGeo();
+    navigator.geolocation.getCurrentPosition((p) => { if (geoOn()) onFix(p, true); }, () => {}, { enableHighAccuracy: false, maximumAge: 0, timeout: 15000 });
+  }
+  setInterval(() => { if (track.pos) meDotState(); reviveGeo(false); }, 10000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { if (track.pos) meDotState(); reviveGeo(true); } });
   // geoOn: watching the location. following: also keep it centered (paused for 15 s after a drag).
   const geoOn = () => track.watch !== null;
   const following = () => geoOn() && $("geoFollow").checked;
