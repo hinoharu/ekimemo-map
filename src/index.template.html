@@ -166,8 +166,8 @@ body.compact #selBar .fig, body.compact #selBar .kana { display: none; }
   position: sticky; top: -14px; z-index: 6; background: var(--paper); margin: -14px -16px 0; padding: 14px 16px 6px; }
 h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: 0.04em; }
 .head button { border: none; background: none; color: var(--muted); font: inherit; cursor: pointer; padding: 2px 4px; }
-.field { display: grid; gap: 5px; }
-.label { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; }
+.field { display: grid; gap: 6px; }
+.label { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; line-height: 1.45; }
 .label output { font-family: var(--font-data); font-size: 18px; color: var(--region); letter-spacing: 0; }
 input[type=text], input[type=number], select {
   font: inherit; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 7px 9px; width: 100%; box-sizing: border-box;
@@ -217,18 +217,23 @@ input[type=range] { width: 100%; accent-color: var(--region); touch-action: none
 .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .sub { border-top: 1px solid var(--rule); padding-top: 10px; display: grid; gap: 8px; }
 /* top-level sections (fold one by one) and the small folds inside them */
+/* spacing by margins: some browsers ignore grid / flex on <details> (the rows were crammed on real devices) */
 details.sec { border-top: 1px solid var(--rule); padding-top: 10px; }
-details.sec[open] { display: grid; gap: 8px; }
+details.sec > :not(summary) { margin-top: 9px; }
+details.sec > .field { margin-top: 13px; }
+details.sec > details.sub2 { margin-top: 8px; }
+details.sec > .field + details.sub2, details.sec > .check + details.sub2 { margin-top: 10px; }
 details.sec > summary { cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: var(--ink); display: flex; align-items: baseline; gap: 8px; }
 details.sec > summary output { font-size: 12px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
-details.sec[open] > summary { margin-bottom: 2px; }
+details.sec > summary { padding: 2px 0; }
 details.sec > summary { list-style: none; }
 details.sec > summary::-webkit-details-marker { display: none; }
 details.sec > summary::before { content: "▸"; color: var(--muted); font-weight: 400; width: 0.9em; }
 details.sec[open] > summary::before { content: "▾"; }
-details.sub2 { display: grid; gap: 6px; }
-details.sub2 > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
-details.sub2[open] { gap: 8px; }
+details.sub2 > summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 2px 0; }
+details.sub2 > :not(summary) { margin-top: 8px; }
+details.sub2[open] { margin-bottom: 4px; }
+details.sub2 > .field + .field, details.sub2 > .sty > * + * { margin-top: 10px; }
 .check.off { opacity: 0.45; }
 /* one-tap choices standing in for a <select> */
 .seg { display: flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: #fff; }
@@ -323,7 +328,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <label class="check"><input type="checkbox" id="nearOn"> 最寄り駅名を常に表示</label>
     <label class="check"><input type="checkbox" id="hideClosed"> 廃駅を隠す</label>
     <label class="check"><input type="checkbox" id="uaHi" checked> 未取得駅を強調表示</label>
-    <label class="check sub-check" data-dep="uaHi"><input type="checkbox" id="uaFill"> 未取得駅を取れる範囲を塗る（位置登録で取れる範囲は濃く）</label>
+    <label class="check sub-check" data-dep="uaHi"><input type="checkbox" id="uaFill"> 未取得駅を取れる範囲を表示</label>
     <label class="check"><input type="checkbox" id="triple"> ブースター・特殊スキルの要否を明示</label>
     <label class="check"><input type="checkbox" id="radarMarks"> レーダーで取れる駅をマーク</label>
     <label class="check sub-check" data-dep="radarMarks"><input type="checkbox" id="stnMarks"> オモイダースで取れる駅もマーク</label>
@@ -683,10 +688,13 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const fmtVer = (v) => /^\d{8}$/.test(v) ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6)}` : v;
 
   const isUa = (i) => st.ua.has(st.rows[i][2]);
+  // the selected station as drawn: none in the multi-station mode (it means nothing there and its ring covered the
+  // group's purple one; its area, three-fold lines and contour lines are hidden too). Kept, and back on leaving the mode
+  const shownSel = () => $("grpMode").checked ? -1 : st.sel;
   // highlighting (colors, sizes, wide-range names, filled areas) can be switched off while keeping the list
   const uaHi = () => st.ua.size > 0 && $("uaHi").checked;
   function stationStyle(i) {
-    const hi = uaHi(), r = st.rows[i], ua = hi && isUa(i), sel = i === st.sel;
+    const hi = uaHi(), r = st.rows[i], ua = hi && isUa(i), sel = i === shownSel();
     return {
       radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
       // with a list loaded, acquired stations recede: a pale solid color (not a translucent fill, which blurred the dots
@@ -710,7 +718,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     let m = 0;
     for (let i = 0; i < n; i++) {
       const r = st.rows[i];
-      if (r[4] < S || r[4] > N || r[5] < W || r[5] > E || i === st.sel) continue;
+      if (r[4] < S || r[4] > N || r[5] < W || r[5] > E || i === shownSel()) continue;
       const p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(i), key = `${s.fillColor}|${s.fillOpacity}|${s.radius}|${s.weight}`;
       let g = groups.get(key); if (!g) groups.set(key, g = { s, pts: [] });
       g.pts.push(p.x, p.y);
@@ -732,11 +740,12 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       ctx.beginPath(); ctx.arc(p.x, p.y, 7.5, 0, 2 * Math.PI); ctx.lineWidth = 4; ctx.strokeStyle = "#fff"; ctx.stroke();
       ctx.lineWidth = 2.2; ctx.strokeStyle = GRP_COLOR; ctx.stroke();
     }
-    if (st.sel >= 0 && st.rows[st.sel]) { // the selected station: dot + ring, on top
-      const r = st.rows[st.sel], p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(st.sel);
+    const ss = shownSel();
+    if (ss >= 0 && st.rows[ss]) { // the selected station: dot + ring, on top
+      const r = st.rows[ss], p = map.latLngToLayerPoint([r[4], r[5]]), s = stationStyle(ss);
       const circle = (rad, w, color, fill) => { ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, 2 * Math.PI); if (fill) { ctx.fillStyle = fill; ctx.globalAlpha = s.fillOpacity; ctx.fill(); ctx.globalAlpha = 1; } ctx.lineWidth = w; ctx.strokeStyle = color; ctx.stroke(); };
       circle(SEL_RING, 4, "#fff"); circle(SEL_RING, 2, s.fillColor); circle(s.radius, s.weight, "#fff", s.fillColor);
-      hi[m] = st.sel; hx[m] = p.x; hy[m] = p.y; hr[m] = SEL_RING; m++;
+      hi[m] = ss; hx[m] = p.x; hy[m] = p.y; hr[m] = SEL_RING; m++;
     }
     drawRadarMarks(ctx, llb);
     hit = { i: hi, x: hx, y: hy, r: hr, n: m };
@@ -905,7 +914,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     drawDots();
     if (viewCtl.update) viewCtl.update();
     if (grp.r) drawGroup();
-    if (st.sel < 0) { // nothing selected (cleared)
+    if (shownSel() < 0) { // nothing selected (cleared), or the multi-station mode
       $("selBar").innerHTML = ""; syncBars();
       st.levelJob++; cancelAsync("lv");
       drawUaAreas(); updateLabels();
@@ -978,7 +987,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const z = map.getZoom(), b = map.getBounds().pad(NAME_PAD + 0.02), all = [], ua = [];
     const hiUa = uaHi(), wantAll = z >= NAME_MIN_ZOOM, wantUa = z >= UA_NAME_MIN_ZOOM && hiUa;
     if (wantAll || wantUa) for (let i = 0; i < st.rows.length; i++) {
-      if (i === st.sel || !b.contains([st.rows[i][4], st.rows[i][5]])) continue;
+      if (i === shownSel() || !b.contains([st.rows[i][4], st.rows[i][5]])) continue;
       if (hiUa && isUa(i)) { if (wantUa) ua.push(i); } else if (wantAll) all.push(i);
     }
     if (all.length + ua.length > NAME_MAX) all.length = 0; // too crowded to read: keep only unacquired / selected
@@ -997,8 +1006,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     };
     draw(all, 12, 6, (r) => r[6] ? "#687089" : "#1d2433");
     draw(ua, 12, 7, (r) => r[6] ? "#8e44ad" : "#d1267a");
-    draw(grpIdx().filter(i => i !== st.sel), 13, 11, () => GRP_COLOR);
-    if (st.sel >= 0 && st.rows[st.sel]) draw([st.sel], 14, 13, () => "#c2410c");
+    draw(grpIdx(), 13, 11, () => GRP_COLOR);
+    if (shownSel() >= 0 && st.rows[shownSel()]) draw([shownSel()], 14, 13, () => "#c2410c");
     if ($("vorNames").checked) drawVorNames(ctx);
   }
   // Names along the nearest-station boundaries: each R_1(i) edge gets i's name on i's side, once (middle of the part
@@ -1348,7 +1357,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const flip = (id) => { const e = $(id); e.checked = !e.checked; e.dispatchEvent(new Event("change")); viewCtl.update(); };
     viewCtl.marks = mk(ICON_MARKS, () => flip("radarMarks"));
     viewCtl.triple = mk(ICON_TRIPLE, () => flip("triple"));
-    viewCtl.clear = mk(ICON_CLEAR, () => grpClearable() ? clearGroupAll() : st.sel >= 0 && clearSel());
+    viewCtl.clear = mk(ICON_CLEAR, () => grpClearable() ? clearGroupAll() : shownSel() >= 0 && clearSel());
     L.DomEvent.disableClickPropagation(box);
     return box;
   };
@@ -1362,23 +1371,20 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     // in the multi-station mode it clears the whole group (and the selection); otherwise the selected station
     const g = grpClearable();
     // nothing to clear: shown faint and inert rather than hidden (user's preference: the buttons keep their places)
-    const none = !g && st.sel < 0;
+    const none = !g && shownSel() < 0; // in the multi-station mode only the group counts
     viewCtl.clear.classList.toggle("disabled", none); viewCtl.clear.setAttribute("aria-disabled", String(none));
-    viewCtl.clear.title = none ? "解除する駅はありません" : g ? "グループの駅と選択をすべて解除" : "選んだ駅の選択を解除";
+    viewCtl.clear.title = none ? "解除する駅はありません" : g ? "グループの駅をすべて解除" : "選んだ駅の選択を解除";
     for (const a of [viewCtl.marks, viewCtl.triple, viewCtl.clear]) a.setAttribute("aria-label", a.title);
   };
   viewCtl.addTo(map);
   const grpClearable = () => $("grpMode").checked && grp.ids.length > 0;
-  // clear the group and the selection at once, undoable for UNDO_MS (a tap on the map button is easy to make)
+  // clear the group (multi-station mode), undoable for UNDO_MS. The selection is left alone: it is not shown in the mode
   function clearGroupAll() {
-    const ids = grp.ids.slice(), selId = st.sel >= 0 && st.rows[st.sel] ? st.rows[st.sel][0] : null;
-    grp.ids = []; saveGroup(); drawDots(); updateLabels();
-    if (selId != null) clearSel(); else drawGroup();
-    toast(`グループの ${ids.length} 駅と選択を解除しました`, ["元に戻す", () => {
-      grp.ids = ids; saveGroup();
-      const i = selId != null ? st.rows.findIndex(r => r[0] === selId) : -1;
-      if (i >= 0) select(i, false); else { drawDots(); updateLabels(); drawGroup(); }
-      toast("グループと選択を元に戻しました");
+    const ids = grp.ids.slice();
+    grp.ids = []; saveGroup(); drawDots(); updateLabels(); drawGroup();
+    toast(`グループの ${ids.length} 駅を解除しました`, ["元に戻す", () => {
+      grp.ids = ids; saveGroup(); drawDots(); updateLabels(); drawGroup();
+      toast("グループを元に戻しました");
     }], UNDO_MS);
   }
   function clearSel() {
@@ -1467,7 +1473,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     $("grpList").innerHTML = gi.map(i => `<button class="chip" data-id="${st.rows[i][0]}" title="グループから外す">${esc(st.rows[i][2])} ×</button>`).join("");
     $("grpInfo").className = "gi" + (none ? " none" : "");
     $("grpInfo").textContent = !gi.length ? "" : none ? `選択中の ${gi.length} 駅に共通するエリアがありません`
-      : gi.length === 1 ? `レーダーに入るエリア ${fmtArea(grp.area)} km²（もう 1 駅追加すると共通するエリアを表示）`
+      : gi.length === 1 ? `レーダーに入るエリア ${fmtArea(grp.area)} km²`
       : `共通するエリア ${grp.area < 0.1 ? "0.1 km² 未満" : `約 ${fmtArea(grp.area)} km²`}`;
     syncBars();
     if (gi.length && !map.hasLayer(grp.r)) grp.r.addTo(map);       // its _draw draws it
@@ -1508,8 +1514,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   function setGroupMode(on) {
     $("grpMode").checked = on;
     try { localStorage.setItem("grpMode", on ? "1" : "0"); } catch (e) {}
-    // the selected station is NOT added (it may be off screen and go unnoticed; the user changed their mind)
-    drawDots(); updateLabels(); drawGroup();
+    // the selected station is NOT added (it may be off screen and go unnoticed; the user changed their mind), and it is
+    // not drawn while in the mode (redraw: its dot, ring, area and bar)
+    redraw(false);
     toast(on ? "複数選択モード：駅をタップするとグループに追加・削除します" : "複数選択モードを終えました（グループは残ります）");
   }
   $("grpMode").addEventListener("change", () => setGroupMode($("grpMode").checked));
@@ -1535,7 +1542,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     // long press (touch) / right click on the SELECTED station: toggle acquired <-> unacquired (undoable for a few
     // seconds). Anywhere else, other stations included: a designated position (long presses meant for a position kept
     // landing on a nearby station and flipping it by accident)
-    if (i >= 0 && i === st.sel) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
+    if (i >= 0 && i === shownSel()) { L.DomEvent.preventDefault(e.originalEvent); toggleUa(i); return; }
     L.DomEvent.preventDefault(e.originalEvent);
     // a designated position: stop using the location (its next fix would overwrite this). "Follow" is kept as it is:
     // it does nothing while the location is off, and turning the location back on is then one tap
