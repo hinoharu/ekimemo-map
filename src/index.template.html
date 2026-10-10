@@ -370,7 +370,6 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
     </div>
     <div class="note">指定位置：地図を長押し（PC は右クリック）した地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
-    <div class="status" id="geoStatus">現在地は使っていません。</div>
     <ol class="radar" id="radarList" hidden></ol>
     <ol class="log" id="log" aria-live="polite"></ol>
   </details>
@@ -1183,10 +1182,6 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     updateNearBox(lat, lng, near, simulated);
     const vnKey = near + "|" + $("nearBox").hidden;
     if ($("vorNames").checked && st.vorNameKey !== vnKey) { st.vorNameKey = vnKey; updateLabels(); }
-    $("geoStatus").innerHTML =
-      `${simulated ? "指定位置" : "現在地"}の最寄り：<b>${esc(r0[2])}</b>（${km(lat, lng, r0[4], r0[5])}${acc ? `・精度 ±${Math.round(acc)} m` : ""}）` +
-      (st.sel >= 0 ? `<br>${esc(st.rows[st.sel][2])} は <b>${R.selRank} 位</b>（${inSel ? "圏内" : "圏外"}）` : "") +
-      (st.ua.size ? `<br>レーダー内の未取得駅：${uaIn.length ? uaIn.map(i => `<b style="color:var(--ua)">${esc(st.rows[i][2])}</b>`).join("・") : "なし"}` : "");
     if ($("uaSort").value === "near") renderUaList();
   }
 
@@ -1247,7 +1242,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // geoRate: minimum seconds between applied updates (0 = every fix, never older than the fix itself)
   const geoRate = () => +$("geoRate").value;
   function onFix(p, quick) {
-    const now = Date.now();
+    const now = Date.now(); track.lastErr = null; // a fix: a later problem is shown again
     if (quick && track.precise) return; // the quick coarse fix arrived after a precise one
     if (!quick && track.precise && now - track.lastFix < geoRate() * 1000 - 200) return;
     const first = !track.precise && !track.lastFix && following();
@@ -1256,11 +1251,12 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     pingMe();
     if (first && $("autoZoom").checked) { const z = Math.max(map.getZoom(), 14); map.setView(centerFor(p.coords.latitude, p.coords.longitude, z), z); }
   }
+  // problems with the location go to a toast (the panel's status line was dropped); the same one only once in a row
+  function geoErr(msg) { if (msg !== track.lastErr) { track.lastErr = msg; toast(msg, null, 6000); } }
   function startGeo() {
-    if (!("geolocation" in navigator)) { $("geoStatus").textContent = "このブラウザは現在地の取得に対応していません。"; geoCtl.update(); return; }
-    track.lastUser = 0; track.lastFix = 0; track.precise = false;
-    if (!window.isSecureContext) $("geoStatus").textContent = "https か localhost で開いていないため、現在地を取得できない可能性があります。";
-    else $("geoStatus").textContent = "現在地を取得しています…";
+    if (!("geolocation" in navigator)) { geoErr("このブラウザは現在地の取得に対応していません。"); geoCtl.update(); return; }
+    track.lastUser = 0; track.lastFix = 0; track.precise = false; track.lastErr = null;
+    if (!window.isSecureContext) geoErr("https か localhost で開いていないため、現在地を取得できない可能性があります。");
     if (track.pos && !track.pos.simulated && $("geoFollow").checked) centerOn(track.pos.lat, track.pos.lng); // last known, right away
     // a quick (possibly cached / network-based) fix first, then the precise watch below takes over
     navigator.geolocation.getCurrentPosition((p) => { if (geoOn()) onFix(p, true); }, () => {},
@@ -1275,7 +1271,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       (err) => {
         const why = err.code === 1 ? "位置情報の利用が許可されていません。ブラウザの設定で許可してください。"
                   : err.code === 2 ? "現在地を特定できませんでした。" : "現在地の取得がタイムアウトしました。しばらく待つと再試行します。";
-        $("geoStatus").textContent = why + (window.isSecureContext ? "" : "（https か localhost で開く必要があります）");
+        geoErr(why + (window.isSecureContext ? "" : "（https か localhost で開く必要があります）"));
       },
       { enableHighAccuracy: true, maximumAge: geoRate() * 1000, timeout: 20000 });
   }
@@ -1298,7 +1294,6 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (track.watch !== null) navigator.geolocation.clearWatch(track.watch);
     track.watch = null;
     try { localStorage.setItem("geoUse", "0"); } catch (e) {}
-    $("geoStatus").textContent = track.pos ? "現在地の更新を止めました。" : "現在地は使っていません。";
     if (track.pos) meDotState();
     geoCtl.update();
   }
