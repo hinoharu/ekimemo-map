@@ -240,6 +240,9 @@ details.sub2 > .field + .field, details.sub2 > .sty > * + * { margin-top: 10px; 
 .seg button { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px; color: var(--ink); background: none; border: none; border-left: 1px solid var(--rule); padding: 7px 4px; cursor: pointer; white-space: nowrap; }
 .seg button:first-child { border-left: none; }
 .seg button.on { background: var(--region); color: #fff; font-weight: 700; }
+.colors { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.colors label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.colors input[type=color] { width: 34px; height: 28px; padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: #fff; flex: none; }
 .kstep { display: grid; grid-template-columns: 34px 52px 34px; gap: 4px; align-items: center; }
 .kstep .btn { padding: 5px 0; font-size: 15px; line-height: 1; }
 .kstep input { text-align: center; padding: 6px 2px; font-family: var(--font-data); font-size: 15px; color: var(--region); -moz-appearance: textfield; }
@@ -396,6 +399,11 @@ details.sub[open] > summary { margin-bottom: 4px; }
       <summary>境界線の表示設定（色・太さ・不透明度・線種）</summary>
       <div id="styleBox" style="display:grid;gap:10px"></div>
       <div><button class="btn" id="styleReset">既定に戻す</button></div>
+    </details>
+    <details class="sub2" id="colorSec">
+      <summary>色の設定（順位・選択駅・駅・未取得駅など）</summary>
+      <div class="colors" id="colorBox"></div>
+      <div><button class="btn" id="colorReset">既定に戻す</button></div>
     </details>
     <div class="field">
       <div class="label">鉄道路線</div>
@@ -688,6 +696,16 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   const fmtVer = (v) => /^\d{8}$/.test(v) ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6)}` : v;
 
+  // ---------------- colors (user-settable; localStorage "colors"). The rank tiers are shared by the rank numbers, the
+  // nearest-station box's list and the selected station's area / three-fold view, so their meaning stays aligned
+  const COLOR_DEFAULT = { t0: "#1f5fa8", t1: "#0f8f7e", t2: "#d97706", grp: "#7c3aed", stn: "#c2410c", closed: "#9aa0ad", ua: "#d1267a", uaClosed: "#8e44ad" };
+  const COLOR_KINDS = [["t0", "順位・選択駅のエリア"], ["t1", "三重表示の中間"], ["t2", "三重表示の外側"], ["grp", "複数選択"],
+    ["stn", "駅"], ["closed", "廃駅"], ["ua", "未取得駅"], ["uaClosed", "未取得の廃駅"]];
+  const C = { ...COLOR_DEFAULT };
+  try { const o = JSON.parse(localStorage.getItem("colors") || "null"); if (o) for (const k in COLOR_DEFAULT) if (/^#[0-9a-f]{6}$/i.test(o[k] || "")) C[k] = o[k]; } catch (e) {}
+  // acquired stations recede while a list is loaded: the chosen pale tones for the default colors, else a mix with white
+  const paleOf = (c, def, pale) => c.toLowerCase() === def ? pale : "#" + [1, 3, 5].map(j => Math.round(parseInt(c.slice(j, j + 2), 16) * 0.45 + 255 * 0.55).toString(16).padStart(2, "0")).join("");
+  const stnPale = () => paleOf(C.stn, COLOR_DEFAULT.stn, "#eaa98b"), closedPale = () => paleOf(C.closed, COLOR_DEFAULT.closed, "#c8ccd4");
   const isUa = (i) => st.ua.has(st.rows[i][2]);
   // the selected station as drawn: none in the multi-station mode (it means nothing there and its ring covered the
   // group's purple one; its area, three-fold lines and contour lines are hidden too). Kept, and back on leaving the mode
@@ -700,7 +718,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
       // with a list loaded, acquired stations recede: a pale solid color (not a translucent fill, which blurred the dots
       // and let the white rims of crowded dots read as rings)
-      fillColor: ua ? (r[6] ? "#8e44ad" : "#d1267a") : hi && !sel ? (r[6] ? "#c8ccd4" : "#eaa98b") : (r[6] ? "#9aa0ad" : "#c2410c"),
+      fillColor: ua ? (r[6] ? C.uaClosed : C.ua) : hi && !sel ? (r[6] ? closedPale() : stnPale()) : (r[6] ? C.closed : C.stn),
       fillOpacity: 0.95,
     };
   }
@@ -739,7 +757,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       const r = st.rows[i]; if (!llb.contains([r[4], r[5]])) continue;
       const p = map.latLngToLayerPoint([r[4], r[5]]);
       ctx.beginPath(); ctx.arc(p.x, p.y, 7.5, 0, 2 * Math.PI); ctx.lineWidth = 4; ctx.strokeStyle = "#fff"; ctx.stroke();
-      ctx.lineWidth = 2.2; ctx.strokeStyle = GRP_COLOR; ctx.stroke();
+      ctx.lineWidth = 2.2; ctx.strokeStyle = C.grp; ctx.stroke();
     }
     const ss = shownSel();
     if (ss >= 0 && st.rows[ss]) { // the selected station: dot + ring, on top
@@ -754,7 +772,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   dotR.addTo(map);
   // rank badges: from the position (round, filled) and from its nearest station (square, outlined; only stations
   // that the position's own k do not include). Upper left of the dot, so the name on the right stays readable.
-  const TIER = ["#1f5fa8", "#0f8f7e", "#d97706"]; // ranks ≤ k−6, ≤ k−2, ≤ k (three tiers only with the three-fold view)
+  const TIER = [C.t0, C.t1, C.t2]; // ranks ≤ k−6, ≤ k−2, ≤ k (three tiers only with the three-fold view); set by applyColors
   const tierOf = (rank) => !$("triple").checked ? 0 : rank <= st.k - 6 ? 0 : rank <= st.k - 2 ? 1 : 2;
   function drawRadarMarks(ctx, llb) {
     const R = track.radar; if (!R) return;
@@ -811,7 +829,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   ];
   const STYLE_DEFAULT = {
     sel: { color: "#1f5fa8", weight: 2, opacity: 1, dash: "solid" },
-    vor: { color: "#7a3b8f", weight: 1, opacity: 0.6, dash: "solid" },
+    vor: { color: "#ff3b30", weight: 1, opacity: 0.6, dash: "solid" }, // bright red (user's preference)
     view: { color: "#3b4660", weight: 0.8, opacity: 0.45, dash: "solid" },
     lv: { color: "#1f5fa8", weight: 1, opacity: 0.75, dash: "solid" }, // inner levels drawn darker, outer down to 1/3
   };
@@ -936,15 +954,16 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
         ring.tierFill = fill; ring.addTo(regionLayer);
       });
     }
-    const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), fill: !tri, fillColor: st.style.sel.color, fillOpacity: 0.16, interactive: false });
-    poly.addTo(regionLayer);
+    const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), color: tri ? TIER[2] : TIER[0], fill: !tri, fillColor: TIER[0], fillOpacity: 0.16, interactive: false });
+    poly.lineColor = tri ? TIER[2] : TIER[0]; poly.addTo(regionLayer);
     // three-fold view: k, k−2, k−6 (the inner two as dashed / dotted lines, a little fill each)
     const extra = [];
     if ($("triple").checked) for (const [dk, dash] of TRIPLE) {
       const kk = st.k - dk; if (kk < 1) continue;
       const Rk = region(st.sel, kk);
-      const pl = L.polygon(Rk.latlng, { renderer: lineR, ...lineStyle("sel"), dashArray: dash, fill: false, interactive: false });
-      pl.tripleDash = dash; pl.addTo(regionLayer);
+      const lc = TIER[dk === 2 ? 1 : 0]; // k−2: the middle color, k−6: the inner one (each line in the color of what it encloses)
+      const pl = L.polygon(Rk.latlng, { renderer: lineR, ...lineStyle("sel"), color: lc, dashArray: dash, fill: false, interactive: false });
+      pl.tripleDash = dash; pl.lineColor = lc; pl.addTo(regionLayer);
       extra.push(`<span>${kk} 位以内（${dash === TRIPLE[0][1] ? "破線" : "点線"}）${fmtArea(sphericalArea(Rk.latlng))} km²</span>`);
     }
     if (fly && !st.bootView) fitVisible(poly.getBounds(), { maxZoom: 13 });
@@ -1016,9 +1035,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       }
     };
     draw(all, 12, 6, (r) => r[6] ? "#687089" : "#1d2433");
-    draw(ua, 12, 7, (r) => r[6] ? "#8e44ad" : "#d1267a");
-    draw(grpIdx(), 13, 11, () => GRP_COLOR);
-    if (shownSel() >= 0 && st.rows[shownSel()]) draw([shownSel()], 14, 13, () => "#c2410c");
+    draw(ua, 12, 7, (r) => r[6] ? C.uaClosed : C.ua);
+    draw(grpIdx(), 13, 11, () => C.grp);
+    if (shownSel() >= 0 && st.rows[shownSel()]) draw([shownSel()], 14, 13, () => C.stn);
     if ($("vorNames").checked) drawVorNames(ctx);
   }
   // Names along the nearest-station boundaries: each R_1(i) edge gets i's name on i's side, once (middle of the part
@@ -1410,7 +1429,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // Each member's R_k is the usual exact region; their intersection is cut out on a canvas: fill the first, then keep
   // only what every other one covers ("destination-in"). The outline is each member's boundary kept inside all the
   // others. Area: the same on a small offscreen raster (about 512 px over the overlap's box; an approximation).
-  const GRP_COLOR = "#7c3aed", GRP_MAX = 12;
+  const GRP_MAX = 12;
   // the group is kept while the mode is off, but drawn / checked only while it is on (user: leaving the mode should
   // clear the purple marks)
   function grpAll() { const out = []; for (const id of grp.ids) { const i = st.rows.findIndex(r => r[0] === id); if (i >= 0) out.push(i); } return out; }
@@ -1428,7 +1447,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const pts = polys.map(ll => ll.map(q => map.latLngToLayerPoint(q)));
     const path = (c, P) => { c.beginPath(); P.forEach((p, k) => k ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.closePath(); };
     // each member's own boundary: thin and faint
-    ctx.save(); ctx.globalAlpha = 0.45; ctx.lineWidth = 1; ctx.strokeStyle = GRP_COLOR; ctx.setLineDash([4, 4]);
+    ctx.save(); ctx.globalAlpha = 0.45; ctx.lineWidth = 1; ctx.strokeStyle = C.grp; ctx.setLineDash([4, 4]);
     for (const P of pts) { path(ctx, P); ctx.stroke(); }
     ctx.restore();
     if (!(grp.area > 0)) return; // nothing in common: no fill, no outline (one member: its own region, as when selected)
@@ -1439,12 +1458,12 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const keepInside = () => { o.globalCompositeOperation = "destination-in"; o.fillStyle = "#000"; for (const P of pts) { path(o, P); o.fill(); } o.globalCompositeOperation = "source-over"; };
     const blit = (alpha) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(grpOff, 0, 0); ctx.restore(); };
     o.setTransform(1, 0, 0, 1, 0, 0); o.clearRect(0, 0, W, H); o.setTransform(T);
-    o.fillStyle = GRP_COLOR; path(o, pts[0]); o.fill(); keepInside(); blit(0.3);            // the overlap, filled
+    o.fillStyle = C.grp; path(o, pts[0]); o.fill(); keepInside(); blit(0.3);            // the overlap, filled
     // its outline: every member's boundary, kept only where it lies inside ALL members, its own included, so only the
     // inner half of the line survives. Keeping a boundary inside the OTHER members only left lone line segments where
     // neighbouring regions merely touch along a shared bisector (no overlap at all)
     o.setTransform(1, 0, 0, 1, 0, 0); o.clearRect(0, 0, W, H); o.setTransform(T);
-    o.lineWidth = 4.5; o.strokeStyle = GRP_COLOR; o.lineJoin = "round";
+    o.lineWidth = 4.5; o.strokeStyle = C.grp; o.lineJoin = "round";
     for (const P of pts) { path(o, P); o.stroke(); }
     keepInside(); blit(1);
     grpOff.width = grpOff.height = 0; // give the memory back at once (iOS counts every canvas)
@@ -1955,7 +1974,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (!want1) cancelAsync("ua1"); if (!wantK) cancelAsync("uaK");
     if (!st.ua.size || !(want1 || wantK)) return;
     const ids = []; st.rows.forEach((r, i) => { if (st.ua.has(r[2])) ids.push(i); });
-    const style = { fillColor: "#d1267a", fillOpacity: 1, stroke: false, fillRule: "nonzero", interactive: false };
+    const style = { fillColor: C.ua, fillOpacity: 1, stroke: false, fillRule: "nonzero", interactive: false };
     const add = (layer, renderer) => (out) => { if (job === st.uaJob) L.polygon(out.map(o => o[2]), { ...style, renderer }).addTo(layer); };
     if (want1) regionsAsync("ua1", ids.map(i => [i, 1]), add(uaLayer1, uaR1));
     if (wantK) regionsAsync("uaK", ids.map(i => [i, st.k]), add(uaLayerK, uaRK));
@@ -2008,7 +2027,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     $("styleBox").innerHTML = STYLE_KINDS.map(([k, name]) => {
       const s = st.style[k];
       return `<div class="sty" data-k="${k}"><div>${name}</div><div class="ctl">` +
-        `<input type="color" data-p="color" value="${s.color}" aria-label="${name}の色">` +
+        (k === "sel" ? `<span class="note" title="「色の設定」で変えられます">色↓</span>` : `<input type="color" data-p="color" value="${s.color}" aria-label="${name}の色">`) +
         `<select data-p="weight" aria-label="${name}の太さ">${W.map(w => `<option value="${w}"${+s.weight === w ? " selected" : ""}>${w} px</option>`).join("")}</select>` +
         `<input type="range" data-p="opacity" min="0.05" max="1" step="0.05" value="${s.opacity}" aria-label="${name}の不透明度" title="不透明度">` +
         `<select data-p="dash" aria-label="${name}の線の種類">` +
@@ -2018,7 +2037,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   function restyle(kind) {
     const ls = lineStyle(kind);
-    if (kind === "sel") regionLayer.eachLayer(l => l.tierFill ? null : l.setStyle({ ...ls, fillColor: ls.color, ...(l.tripleDash ? { dashArray: l.tripleDash } : {}) }));
+    if (kind === "sel") regionLayer.eachLayer(l => l.tierFill ? null : l.setStyle({ ...ls, color: l.lineColor || TIER[0], fillColor: TIER[0], ...(l.tripleDash ? { dashArray: l.tripleDash } : {}) }));
     if (kind === "vor") { vorLayer.eachLayer(l => l.setStyle(ls)); if ($("vorNames").checked) updateLabels(); }
     if (kind === "view") viewLayer.eachLayer(l => l.setStyle(ls));
     if (kind === "lv") levelLayer.eachLayer(l => l.setStyle({ ...ls, opacity: ls.opacity * lvOpacity(l.levelF) }));
@@ -2029,8 +2048,21 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     st.style[box.dataset.k][el.dataset.p] = el.value;
     restyle(box.dataset.k); saveStyle();
   });
+  // colors: rank tiers (also the selected station's area), group, stations, unacquired stations
+  function buildColorBox() {
+    $("colorBox").innerHTML = COLOR_KINDS.map(([k, name]) => `<label><input type="color" data-c="${k}" value="${C[k]}" aria-label="${name}の色"><span>${name}</span></label>`).join("");
+  }
+  function applyColors() {
+    TIER[0] = C.t0; TIER[1] = C.t1; TIER[2] = C.t2; st.style.sel.color = C.t0;
+    document.documentElement.style.setProperty("--ua", C.ua); document.documentElement.style.setProperty("--ua-closed", C.uaClosed);
+    drawStations(); updateLabels(); drawUaAreas(); if (st.rows.length) redraw(false);
+    if (track.pos) evaluate(false);
+  }
+  const saveColors = () => { try { localStorage.setItem("colors", JSON.stringify(C)); } catch (e) {} };
+  $("colorBox").addEventListener("input", (e) => { const k = e.target.dataset.c; if (!k) return; C[k] = e.target.value; saveColors(); applyColors(); });
+  $("colorReset").addEventListener("click", () => { Object.assign(C, COLOR_DEFAULT); saveColors(); buildColorBox(); applyColors(); });
   $("styleReset").addEventListener("click", () => {
-    st.style = cloneStyle(STYLE_DEFAULT); saveStyle(); buildStyleBox();
+    st.style = cloneStyle(STYLE_DEFAULT); st.style.sel.color = C.t0; saveStyle(); buildStyleBox();
     for (const [k] of STYLE_KINDS) restyle(k);
   });
 
@@ -2137,7 +2169,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
   } catch (e) {}
   geoCtl.update(); updateDeps();
-  buildStyleBox();
+  st.style.sel.color = C.t0; buildStyleBox(); buildColorBox(); // the selected area's color is the first rank color
+  document.documentElement.style.setProperty("--ua", C.ua); document.documentElement.style.setProperty("--ua-closed", C.uaClosed);
   loadUa();
   loadRows(EMBED.rows, EMBED.version);
   if (hp.get("id")) { const i = st.rows.findIndex(r => r[0] === +hp.get("id")); if (i >= 0) select(i, true); }
