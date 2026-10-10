@@ -37,7 +37,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 #map { position: fixed; inset: 0; }
 .panel {
   position: fixed; z-index: 1000; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
-  width: 320px; max-height: calc(100% - 24px); overflow: auto;
+  width: 320px; max-height: calc(100% - 54px); overflow: auto; /* 12 px above and below, minus padding and border (30 px) */
   background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
   box-shadow: 0 6px 24px rgba(29, 36, 51, 0.16); padding: 14px 16px; display: grid; gap: 12px;
 }
@@ -61,7 +61,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 #nearBox .d { font-size: 10.5px; opacity: 0.85; font-variant-numeric: tabular-nums; }
 #nearBox .ua { background: var(--ua); }
 #nearBox .cl { background: #626878; }
-@media (min-width: 641px) { #nearBox { left: 380px; } }
+@media (min-width: 641px) { body:not(.folded) #nearBox { left: 380px; } } /* right of the open panel */
 /* "a new version is out" bar (the service worker of a newer build took over) */
 #toast { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 10px; background: #1d2433; color: #fff; padding: 8px 14px; border-radius: 4px; font-size: 13px;
@@ -105,15 +105,13 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   body.compact .panel.collapsed .head { margin: 0; padding: 0; }
   body.compact .panel.collapsed #fold { width: 38px; height: 38px; }
 }
-/* phones: folded, the panel shrinks to a round menu button at the bottom right (above the attribution) */
-@media (max-width: 640px) {
-  .panel.collapsed { left: auto; right: 10px; bottom: calc(34px + env(safe-area-inset-bottom, 0px)); width: auto; padding: 0; gap: 0; overflow: visible; border-radius: 50%; }
-  .panel.collapsed .head { position: static; margin: 0; padding: 0; background: none; }
-  .panel.collapsed h1 { display: none; }
-  .panel.collapsed #fold { width: 48px; height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--ink); }
-  .panel.collapsed #fold .fold-ico { display: block; }
-  .panel.collapsed #fold .fold-txt { display: none; }
-}
+/* folded (any width): the panel shrinks to a round menu button at the bottom right (above the attribution) */
+.panel.collapsed { left: auto; top: auto; right: 10px; bottom: calc(34px + env(safe-area-inset-bottom, 0px)); width: auto; padding: 0; gap: 0; overflow: visible; border-radius: 50%; }
+.panel.collapsed .head { position: static; margin: 0; padding: 0; background: none; }
+.panel.collapsed h1 { display: none; }
+.panel.collapsed #fold { width: 48px; height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--ink); }
+.panel.collapsed #fold .fold-ico { display: block; }
+.panel.collapsed #fold .fold-txt { display: none; }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   /* stays visible while the panel scrolls (top = -panel padding) */
   position: sticky; top: -14px; z-index: 6; background: var(--paper); margin: -14px -16px 0; padding: 14px 16px 6px; }
@@ -1450,17 +1448,21 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
   $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; cancelAsync("view"); viewLayer.clearLayers(); } });
   $("showClosed").addEventListener("change", () => applyFilter(true));
   function setFolded(c) {
-    $("panel").classList.toggle("collapsed", c);
+    $("panel").classList.toggle("collapsed", c); document.body.classList.toggle("folded", c);
     $("fold").querySelector(".fold-txt").textContent = c ? "ひらく" : "たたむ";
     $("fold").setAttribute("aria-expanded", String(!c)); $("fold").setAttribute("aria-label", c ? "メニューをひらく" : "メニューをたたむ");
     if (!c && st.ua.size) renderUaList(); // the list is not kept up to date while folded
   }
+  const wideMq = window.matchMedia("(min-width: 641px)");
   $("fold").addEventListener("click", () => {
     setFolded(!$("panel").classList.contains("collapsed"));
+    if (wideMq.matches) try { localStorage.setItem("panelFolded", $("panel").classList.contains("collapsed") ? "1" : "0"); } catch (e) {}
     if (following() && track.pos && !paused()) centerOn(track.pos.lat, track.pos.lng);
   });
-  // phones: the panel is a bottom sheet over half the map, so it starts folded (wide screens: open)
-  if (window.matchMedia("(max-width: 640px)").matches) setFolded(true);
+  // phones: the panel is a bottom sheet over half the map, so it starts folded; wide screens (tablets, PCs): as it
+  // was left (open the first time)
+  if (!wideMq.matches) setFolded(true);
+  else try { if (localStorage.getItem("panelFolded") === "1") setFolded(true); } catch (e) {}
   // compact mode (phones only, see CSS): auto = a short screen (split screen with the game, landscape)
   const shortMq = window.matchMedia("(max-height: 620px)");
   function applyCompact() {
