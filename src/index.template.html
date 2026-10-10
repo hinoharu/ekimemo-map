@@ -40,7 +40,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
    (= designated position / toggle) must not start a text selection over the whole page or open the callout.
    Only the map and what floats on it; not the panel (its search box must stay editable) */
 @supports (-webkit-touch-callout: none) {
-  #map, #nearBox, #updBar, #toast, #grpBar, .menu-fab { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #map, #nearBox, #updBar, #toast, #grpBar, #selBar, .menu-fab { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 }
 .panel {
   position: fixed; z-index: 1000; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
@@ -93,13 +93,24 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 #toast[hidden] { display: none; }
 #toast button { font: inherit; font-weight: 700; border: none; border-radius: 4px; background: #fff; color: #1d2433; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
 /* multi-station mode: the group's stations as purple pills at the bottom of the map, with the overlap's area */
-#grpBar { position: fixed; z-index: 1040; left: 8px; bottom: calc(40px + env(safe-area-inset-bottom, 0px)); max-width: calc(100% - 76px);
+#grpBar, #selBar { position: fixed; z-index: 1040; left: 8px; bottom: calc(40px + env(safe-area-inset-bottom, 0px)); max-width: calc(100% - 76px);
   box-sizing: border-box; display: grid; gap: 4px; padding: 6px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 2px 12px rgba(20, 24, 34, 0.22); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
-#grpBar[hidden] { display: none; }
+#grpBar[hidden], #selBar[hidden] { display: none; }
+/* the selected station (outside the multi-station mode): a blue pill, its area(s) and the calculation figures */
+#selBar .top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+#selBar .pill { font: inherit; font-size: 13px; font-weight: 700; border: 1px solid #93b4dc; background: #eef4fb; color: #174b86; border-radius: 12px; padding: 2px 10px; cursor: pointer; }
+#selBar .kana { font-size: 11px; color: var(--muted); }
+#selBar .badge { margin-left: 0; }
+#selBar .badge.cl { background: #626878; }
+#selBar .uab { font: inherit; font-size: 11.5px; border: 1px solid var(--rule); background: #fff; color: var(--ink); border-radius: 4px; padding: 2px 7px; cursor: pointer; }
+#selBar .ar { font-size: 12px; color: #174b86; }
+#selBar .ar span { white-space: nowrap; }
+#selBar .fig { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+body.compact #selBar .fig, body.compact #selBar .kana { display: none; }
 #grpBar .gi { font-size: 12px; color: #4c1d95; }
 #grpBar .gi.none { color: #fff; background: rgba(124, 58, 237, 0.9); border-radius: 4px; padding: 3px 8px; justify-self: start; }
-@media (min-width: 641px) { body:not(.folded) #grpBar { left: 352px; max-width: calc(100% - 420px); } } /* right of the open panel */
+@media (min-width: 641px) { body:not(.folded) #grpBar, body:not(.folded) #selBar { left: 352px; max-width: calc(100% - 420px); } } /* right of the open panel */
 #updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + var(--gb, 0px) + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 8px; background: #1d2433; color: #fff; padding: 6px 6px 6px 14px; border-radius: 6px;
   font-size: 13px; box-shadow: 0 4px 16px rgba(20, 24, 34, 0.3); white-space: nowrap; }
@@ -269,6 +280,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 <div id="map" role="application" aria-label="地図"></div>
 
 <div id="nearBox" hidden aria-live="polite"></div>
+<div id="selBar" hidden role="status"></div>
 <div id="grpBar" hidden role="status"><div class="chips" id="grpList"></div><div class="gi" id="grpInfo"></div></div>
 <input type="checkbox" id="grpMode" hidden aria-hidden="true">
 <div id="updBar" hidden role="status"><span>新しい版があります</span><button id="updGo">再読み込み</button><button id="updX" aria-label="閉じる">×</button></div>
@@ -296,7 +308,6 @@ details.sub[open] > summary { margin-bottom: 4px; }
     </div>
   </div>
 
-  <div class="sel" id="selbox"></div>
 
   <details class="sec" data-sec="disp">
     <summary>表示</summary>
@@ -898,7 +909,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (viewCtl.update) viewCtl.update();
     if (grp.r) drawGroup();
     if (st.sel < 0) { // nothing selected (cleared)
-      $("selbox").innerHTML = '<div class="note">駅を選んでいません。地図の駅をタップするか、上の欄で検索してください。</div>';
+      $("selBar").innerHTML = ""; syncBars();
       st.levelJob++; cancelAsync("lv");
       drawUaAreas(); updateLabels();
       track.prev = null; if (track.pos) evaluate(false);
@@ -917,18 +928,20 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       const Rk = region(st.sel, kk);
       const pl = L.polygon(Rk.latlng, { renderer: lineR, ...lineStyle("sel"), dashArray: dash, fillColor: st.style.sel.color, fillOpacity: 0.1, interactive: false });
       pl.tripleDash = dash; pl.addTo(regionLayer);
-      extra.push(`<dt>${kk} 位以内（${dash === TRIPLE[0][1] ? "破線" : "点線"}）</dt><dd>${fmtArea(sphericalArea(Rk.latlng))} km²</dd>`);
+      extra.push(`<span>${kk} 位以内（${dash === TRIPLE[0][1] ? "破線" : "点線"}）${fmtArea(sphericalArea(Rk.latlng))} km²</span>`);
     }
     if (fly && !st.bootView) fitVisible(poly.getBounds(), { maxZoom: 13 });
     const area = sphericalArea(R.latlng);
-    $("selbox").innerHTML =
-      `<div class="name">${esc(r[2])}<small>${esc(r[3])}${r[6] ? "・廃駅" : ""}</small>${isUa(st.sel) ? '<span class="badge">未取得</span>' : ""}</div>` +
-      `<div><button class="btn" id="uaToggleSel">${isUa(st.sel) ? "取得済みにする" : "未取得にする"}</button></div>` +
-      `<dl class="stats">` +
-      `<dt>${st.k} 位以内の地域の面積</dt><dd>${fmtArea(area)} km²</dd>` + extra.join("") +
-      `<dt>計算時間</dt><dd>${(R.ms ?? ms).toFixed(1)} ms</dd>` +
-      `<dt>使った二等分線</dt><dd>${R.lines} 本</dd>` +
-      `<dt>境界の頂点</dt><dd>${R.local.length} 個</dd></dl>`;
+    // the selected station's info: a bar at the bottom of the map (user: like the multi-station bar; no longer in the
+    // panel). The pill's × clears the selection
+    $("selBar").innerHTML =
+      `<div class="top"><button class="pill" id="selPill" title="選択を解除">${esc(r[2])} ×</button>` +
+      (r[3] ? `<span class="kana">${esc(r[3])}</span>` : "") +
+      (isUa(st.sel) ? '<span class="badge">未取得</span>' : "") + (r[6] ? '<span class="badge cl">廃止</span>' : "") +
+      `<button class="uab" id="uaToggleSel">${isUa(st.sel) ? "取得済みにする" : "未取得にする"}</button></div>` +
+      `<div class="ar"><span>${st.k} 位以内 ${fmtArea(area)} km²</span>${extra.length ? "・" + extra.join("・") : ""}</div>` +
+      `<div class="fig">計算 ${(R.ms ?? ms).toFixed(1)} ms・二等分線 ${R.lines} 本・頂点 ${R.local.length} 個</div>`;
+    syncBars();
     if ($("levels").checked) drawLevels(); else { st.levelJob++; cancelAsync("lv"); }
     if ($("viewAll").checked) drawView();
     drawUaAreas();
@@ -1447,19 +1460,27 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     for (let k = 3; k < d.length; k += 4) if (d[k] > 127) cnt++; // whole pixels only: regions that merely touch leave faint antialiased ones
     return cnt / (sc * sc) * 111.195 * 111.195;
   }
+  // one bar at the bottom of the map at a time: the group in the multi-station mode, else the selected station;
+  // toasts and the update bar go above it (--gb)
+  function syncBars() {
+    const g = $("grpBar"), sb = $("selBar");
+    sb.hidden = !(st.sel >= 0 && sb.firstChild && !$("grpMode").checked);
+    const vis = !g.hidden ? g : !sb.hidden ? sb : null;
+    document.body.style.setProperty("--gb", vis ? vis.offsetHeight + 8 + "px" : "0px");
+  }
   function drawGroup() {
     const all = grpAll(), gi = grpIdx(), polys = gi.map(i => region(i, st.k).latlng);
     grp.area = groupArea(polys);
     // the bar at the bottom of the map: only in the mode, with stations in the group (user's idea; the panel section
     // was dropped). The "no common area" line stays there all along (easy to miss on the map)
     const bar = $("grpBar"), none = gi.length > 1 && !(grp.area > 0);
-    bar.hidden = !gi.length;
+    bar.hidden = !gi.length; syncBars();
     $("grpList").innerHTML = gi.map(i => `<button class="chip" data-id="${st.rows[i][0]}" title="グループから外す">${esc(st.rows[i][2])} ×</button>`).join("");
     $("grpInfo").className = "gi" + (none ? " none" : "");
     $("grpInfo").textContent = !gi.length ? "" : none ? `選択中の ${gi.length} 駅に共通するエリアがありません`
       : gi.length === 1 ? `レーダーに入るエリア ${fmtArea(grp.area)} km²（もう 1 駅追加すると共通するエリアを表示）`
       : `共通するエリア ${grp.area < 0.1 ? "0.1 km² 未満" : `約 ${fmtArea(grp.area)} km²`}`;
-    document.body.style.setProperty("--gb", bar.hidden ? "0px" : bar.offsetHeight + 8 + "px"); // toasts go above it
+    syncBars();
     if (gi.length && !map.hasLayer(grp.r)) grp.r.addTo(map);       // its _draw draws it
     else if (!gi.length && map.hasLayer(grp.r)) map.removeLayer(grp.r);
     else if (gi.length) drawGroupCanvas();
@@ -1915,7 +1936,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   $("uaSort").addEventListener("change", renderUaList);
   $("uaListSec").addEventListener("toggle", () => { if ($("uaListSec").open) renderUaList(); });
   map.on("moveend", () => { if (!track.pos && $("uaSort").value === "near" && st.ua.size && !$("panel").classList.contains("collapsed") && $("uaListSec").open) renderUaList(); });
-  $("selbox").addEventListener("click", (e) => { if (e.target.id === "uaToggleSel" && st.sel >= 0) toggleUa(st.sel); });
+  $("selBar").addEventListener("click", (e) => {
+    if (e.target.id === "uaToggleSel" && st.sel >= 0) toggleUa(st.sel);
+    else if (e.target.id === "selPill") clearSel();
+  });
   // filled areas: union of R_1 (位置登録) / R_k (レーダー) over all unacquired stations (async, cached per station)
   function drawUaAreas() {
     const job = ++st.uaJob; uaLayer1.clearLayers(); uaLayerK.clearLayers();
