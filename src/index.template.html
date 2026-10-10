@@ -417,6 +417,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 </script>
 <script>
 const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
+const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
 </script>
 <script>
 (() => {
@@ -1751,11 +1752,23 @@ const EMBED = { version: "/*VERSION*/", rows: /*DATA*/ };
     navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) $("updBar").hidden = false; });
     navigator.serviceWorker.register("sw.js").then((reg) => {
       offCount();
-      const check = () => { reg.update().catch(() => {}); };
+      const check = () => { if (reg) reg.update().catch(() => {}); };
       document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
       setInterval(check, 30 * 60 * 1000);
     }).catch((e) => { $("offCount").textContent = `オフライン対応を有効にできませんでした（${e.message}）`; });
   } else $("offCount").textContent = "https か localhost で開いたときだけ保存できます。";
+  // iOS (iPad / iPhone, any browser): the controllerchange event above did not show up there. Read the build id of the
+  // published sw.js (bypassing the HTTP cache) and compare it with this page's, when the app comes back to the front
+  // and every 30 minutes. Android / PCs keep the event only.
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isIOS && location.protocol !== "file:") {
+    const checkBuild = () => fetch("sw.js", { cache: "no-store" }).then((r) => r.ok ? r.text() : "").then((t) => {
+      const m = t.match(/const BUILD = "([0-9a-f]+)"/);
+      if (m && m[1] !== BUILD_ID) $("updBar").hidden = false;
+    }).catch(() => {});
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) checkBuild(); });
+    setInterval(checkBuild, 30 * 60 * 1000);
+  }
   $("reloadPage").addEventListener("click", () => location.reload());
   $("updGo").addEventListener("click", () => location.reload());
   $("updX").addEventListener("click", () => { $("updBar").hidden = true; });

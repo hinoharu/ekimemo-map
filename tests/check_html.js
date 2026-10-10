@@ -2,7 +2,7 @@
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const html = fs.readFileSync(path.join(__dirname, "..", "dist", "index.html"), "utf8");
 let errors = 0;
-for (const ph of ["/*CORE*/", "/*DATA*/", "/*VERSION*/"]) if (html.includes(ph)) { console.error(`placeholder ${ph} left in dist/index.html`); errors++; }
+for (const ph of ["/*CORE*/", "/*DATA*/", "/*VERSION*/", "/*BUILD*/"]) if (html.includes(ph)) { console.error(`placeholder ${ph} left in dist/index.html`); errors++; }
 const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 scripts.forEach((code, i) => {
   try { new vm.Script(code, { filename: `inline-script-${i}.js` }); }
@@ -19,6 +19,9 @@ try {
 try {
   const sw = fs.readFileSync(path.join(__dirname, "..", "dist", "sw.js"), "utf8");
   if (sw.includes("/*BUILD*/")) throw new Error("placeholder /*BUILD*/ left");
+  // the page and the service worker carry the same build id (iOS compares them to find a newer build)
+  const a = (sw.match(/const BUILD = "([0-9a-f]+)"/) || [])[1], b = (html.match(/const BUILD_ID = "([0-9a-f]+)"/) || [])[1];
+  if (!a || a !== b) throw new Error(`build id differs: sw.js ${a}, index.html ${b}`);
   new vm.Script(sw, { filename: "sw.js" });
 } catch (e) { console.error(`dist/sw.js: ${e.message}`); errors++; }
 // installable web app: the manifest parses, is linked from the page and its icons exist with the stated sizes
