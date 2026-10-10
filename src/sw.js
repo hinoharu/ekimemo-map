@@ -33,10 +33,14 @@ self.addEventListener("fetch", (e) => {
   if (url.hostname === "cyberjapandata.gsi.go.jp" && url.pathname.startsWith("/xyz/")) return e.respondWith(gsiTile(req));
 });
 
+// Revalidated with the server every time (cache: "no-cache"; an unchanged file costs a 304): GitHub Pages lets
+// browsers keep the page for about 10 minutes, and on iOS a reload right after an update could get that old copy
+// from the HTTP cache, so the "new version" bar came up a second time. (A navigation request cannot be re-created
+// with other options, so it is fetched by its URL.)
 async function networkFirst(req, key) {
   const c = await caches.open(SHELL);
   try {
-    const res = await fetch(req);
+    const res = await fetch(req.mode === "navigate" ? req.url : req, { cache: "no-cache" });
     if (res.ok) c.put(key, res.clone());
     return res;
   } catch (err) {
