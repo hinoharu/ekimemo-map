@@ -263,6 +263,10 @@ details.sub2 > .field + .field, details.sub2 > .sty > * + * { margin-top: 10px; 
 .colors { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
 .colors label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .colors input[type=color] { width: 34px; height: 28px; padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: #fff; flex: none; }
+.tg3 { display: grid; grid-template-columns: 1fr 1.25fr 1fr; gap: 6px; }
+.tg3 button { font: inherit; font-size: 12.5px; border: 1px solid var(--rule); border-radius: 6px; background: #fff; color: var(--ink); padding: 7px 2px; cursor: pointer; }
+.tg3 button.on { color: #fff; font-weight: 700; border-color: transparent; }
+#kSum b { font-size: 15px; }
 .kstep { display: grid; grid-template-columns: 34px 52px 34px; gap: 4px; align-items: center; }
 .kstep .btn { padding: 5px 0; font-size: 15px; line-height: 1; }
 .kstep input { text-align: center; padding: 6px 2px; font-family: var(--font-data); font-size: 15px; color: var(--region); -moz-appearance: textfield; }
@@ -296,6 +300,20 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .geo-ctl a.on:hover { background: #174b86; }
 .geo-ctl a.armed { color: var(--region); }
 .geo-ctl a[hidden] { display: none; }
+/* the radar buttons */
+.radar-ctl a.pm { font-size: 20px; font-weight: 400; color: var(--ink); }
+.radar-ctl a.cnt { flex-direction: column; line-height: 1; color: var(--region); }
+.radar-ctl a.cnt b { font-size: 17px; font-family: var(--font-data); }
+.radar-ctl a.cnt.off b { color: #9aa0ad; text-decoration: line-through; }
+.radar-ctl a.cnt .dots { display: flex; gap: 2px; margin-top: 2px; }
+.radar-ctl a.cnt .dots i { width: 5px; height: 5px; border-radius: 50%; display: block; }
+.radar-ctl.compact { position: relative; overflow: visible; }
+.radar-ctl .radar-pop { position: absolute; top: -2px; right: calc(100% + 6px); display: flex; background: #fff; border: 2px solid rgba(0, 0, 0, 0.2); border-radius: 4px; box-shadow: 0 4px 14px rgba(20, 24, 34, 0.25); }
+.radar-ctl .radar-pop[hidden] { display: none; }
+.radar-ctl .radar-pop a { width: 34px; height: 34px; border-bottom: none; border-left: 1px solid #ccc; border-radius: 0; }
+.radar-ctl .radar-pop a:first-child { border-left: none; }
+.radar-ctl .radar-pop a.x { color: var(--muted); }
+.radar-ctl.open > a.cnt { background: #eef4fb; }
 .geo-ctl a.disabled { color: #c4c9d2; pointer-events: none; cursor: default; } /* opaque: opacity let the map show through */
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chips:empty { display: none; }
@@ -324,15 +342,22 @@ details.sub[open] > summary { margin-bottom: 4px; }
   </div>
 
   <div class="field">
-    <label class="label" for="kn">レーダー最大駅数</label>
+    <label class="label" for="kn">素の検知駅数（電友の状況）</label>
     <div class="krow">
-      <input type="range" id="kr" min="1" max="18" value="18" aria-label="レーダー最大駅数（スライダー、18 まで）">
+      <input type="range" id="kr" min="2" max="12" value="12" aria-label="素の検知駅数（スライダー、12 まで）">
       <div class="kstep">
         <button class="btn" id="kMinus" type="button" aria-label="1 減らす">−</button>
-        <input type="number" id="kn" min="1" max="500" value="18" inputmode="numeric" aria-label="レーダー最大駅数">
+        <input type="number" id="kn" min="2" max="30" value="12" inputmode="numeric" aria-label="素の検知駅数">
         <button class="btn" id="kPlus" type="button" aria-label="1 増やす">＋</button>
       </div>
     </div>
+    <div class="label">使う手段（地図のボタンでも切り替え）</div>
+    <div class="tg3" role="group" aria-label="使う手段">
+      <button type="button" id="useRadar" aria-pressed="true">レーダー</button>
+      <button type="button" id="useBooster" aria-pressed="true">ブースター +4</button>
+      <button type="button" id="useNatsume" aria-pressed="true">なつめ +2</button>
+    </div>
+    <div class="note" id="kSum"></div>
   </div>
 
 
@@ -357,7 +382,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
     <label class="check"><input type="checkbox" id="hideClosed"> 廃駅を隠す</label>
     <label class="check"><input type="checkbox" id="uaHi" checked> 未取得駅を強調表示</label>
     <label class="check sub-check" data-dep="uaHi"><input type="checkbox" id="uaFill"> 未取得駅を取れる範囲を表示</label>
-    <label class="check"><input type="checkbox" id="triple"> ブースター・特殊スキルの要否を明示</label>
+    <label class="check"><input type="checkbox" id="triple"> 選択駅の登録可能エリアを、使う手段ごとに塗り分ける</label>
     <label class="check"><input type="checkbox" id="radarMarks"> レーダーで取れる駅をマーク</label>
     <label class="check sub-check" data-dep="radarMarks"><input type="checkbox" id="stnMarks"> オモイダースで取れる駅もマーク</label>
     <label class="check"><input type="checkbox" id="autoZoom"> オートズームを許可する</label>
@@ -571,7 +596,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([35.68, 139.76], 11);
   const zoomCtl = L.control.zoom({ position: "topright" }).addTo(map);
   const viewCtl = L.control({ position: "topright" }); // view buttons (rank numbers, three-fold, clear); built below
-  const multiCtl = L.control({ position: "topright" }); // multi-station mode button; built below
+  const multiCtl = {}; // the multi-station mode button lives in viewCtl now; multiCtl.update kept as its entry point
+  const clearCtl = L.control({ position: "topright" }); // clear the selection (on its own: user); built below
+  const radarCtl = L.control({ position: "topright" }); // the radar: base count and means; built below
   const grp = { r: null, ids: [], area: null }; // multi-station overlap (filled in by the group section below)
   const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>';
   // load tiles while the map is still moving (Leaflet's default on phones waits until it stops) and keep
@@ -798,7 +825,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // rank badges: from the position (round, filled) and from its nearest station (square, outlined; only stations
   // that the position's own k do not include). Upper left of the dot, so the name on the right stays readable.
   const TIER = [C.t0, C.t1, C.t2]; // ranks ≤ k−6, ≤ k−2, ≤ k (three tiers only with the three-fold view); set by applyColors
-  const tierOf = (rank) => !$("triple").checked ? 0 : rank <= st.k - 6 ? 0 : rank <= st.k - 2 ? 1 : 2;
+  const tierOf = (rank) => { if (!$("triple").checked) return 0; const t = radarTiers().find(x => rank <= x.k); return MEANS_TIER[(t || radarTiers().slice(-1)[0]).m]; };
   function drawRadarMarks(ctx, llb) {
     const R = track.radar; if (!R) return;
     const lists = [];
@@ -951,7 +978,23 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     try { history.replaceState(null, "", `#id=${r[0]}&k=${st.k}&m=${st.metric}`); } catch (e) {}
   }
 
-  const TRIPLE = [[2, "7 5"], [6, "1.5 4"]]; // k−2 dashed, k−6 dotted
+  // the radar: the base number of stations (2..12 from the friends online; more by hand for events) and the means used —
+  // the radar itself, a booster (+4) and natsume's skill (+2), in the order players reach for them (user). Tiers, inner
+  // to outer: base, +booster, +natsume; each means has its rank color (TIER 0, 1, 2) and line (dotted, dashed, solid
+  // for the outermost). Without the radar only check-in counts: k = 1. st.k is the outermost tier
+  const RADAR_DEF = { base: 12, radar: true, booster: true, natsume: true };
+  st.radar = { ...RADAR_DEF };
+  try { const o = JSON.parse(localStorage.getItem("radarCfg") || "null"); if (o) for (const key in RADAR_DEF) if (typeof o[key] === typeof RADAR_DEF[key]) st.radar[key] = o[key]; } catch (e) {}
+  const MEANS_TIER = { base: 0, booster: 1, natsume: 2 }, MEANS_DASH = { base: "1.5 4", booster: "7 5" };
+  function radarTiers() {
+    const R = st.radar;
+    if (!R.radar) return [{ k: 1, m: "base" }];
+    const t = [{ k: R.base, m: "base" }];
+    if (R.booster) t.push({ k: t[t.length - 1].k + 4, m: "booster" });
+    if (R.natsume) t.push({ k: t[t.length - 1].k + 2, m: "natsume" });
+    return t;
+  }
+  st.k = radarTiers().slice(-1)[0].k;
   const fmtArea = (a) => a < 100 ? a.toFixed(1) : Math.round(a).toLocaleString();
   function redraw(fly) {
     regionLayer.clearLayers(); levelLayer.clearLayers();
@@ -972,24 +1015,25 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const tri = $("triple").checked;
     // three-fold view: the fills match the rank numbers' colors (user): ≤ k−6 blue, ≤ k−2 green, ≤ k orange, each band a
     // ring (the inner area cut out) so the colors do not mix; the lines stay in the selection's color and dash
-    if (tri) {
-      const lv = [st.k, st.k - 2, st.k - 6].filter(kk => kk >= 1).map(kk => region(st.sel, kk).latlng);
+    // the tiers (base, +booster, +natsume) as rings in their colors, when 塗り分け is on and there is more than one
+    const tiers = radarTiers(), multi = tri && tiers.length > 1, outC = multi ? TIER[MEANS_TIER[tiers[tiers.length - 1].m]] : TIER[0];
+    if (multi) {
+      const lv = tiers.map(t => region(st.sel, t.k).latlng).reverse(); // outer first
       lv.forEach((ll, j) => {
-        const fill = TIER[2 - j], ring = L.polygon(j + 1 < lv.length ? [ll, lv[j + 1]] : [ll], { renderer: lineR, stroke: false, fillColor: fill, fillOpacity: 0.22, interactive: false });
+        const fill = TIER[MEANS_TIER[tiers[tiers.length - 1 - j].m]];
+        const ring = L.polygon(j + 1 < lv.length ? [ll, lv[j + 1]] : [ll], { renderer: lineR, stroke: false, fillColor: fill, fillOpacity: 0.22, interactive: false });
         ring.tierFill = fill; ring.addTo(regionLayer);
       });
     }
-    const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), color: tri ? TIER[2] : TIER[0], fill: !tri, fillColor: TIER[0], fillOpacity: 0.16, interactive: false });
-    poly.lineColor = tri ? TIER[2] : TIER[0]; poly.addTo(regionLayer);
-    // three-fold view: k, k−2, k−6 (the inner two as dashed / dotted lines, a little fill each)
+    const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), color: outC, fill: !multi, fillColor: TIER[0], fillOpacity: 0.16, interactive: false });
+    poly.lineColor = outC; poly.addTo(regionLayer);
+    // the inner tiers' lines: dotted (base) / dashed (+booster), each in the color of what it encloses
     const extra = [];
-    if ($("triple").checked) for (const [dk, dash] of TRIPLE) {
-      const kk = st.k - dk; if (kk < 1) continue;
-      const Rk = region(st.sel, kk);
-      const lc = TIER[dk === 2 ? 1 : 0]; // k−2: the middle color, k−6: the inner one (each line in the color of what it encloses)
+    if (multi) for (const t of tiers.slice(0, -1)) {
+      const Rk = region(st.sel, t.k), lc = TIER[MEANS_TIER[t.m]], dash = MEANS_DASH[t.m];
       const pl = L.polygon(Rk.latlng, { renderer: lineR, ...lineStyle("sel"), color: lc, dashArray: dash, fill: false, interactive: false });
       pl.tripleDash = dash; pl.lineColor = lc; pl.addTo(regionLayer);
-      extra.push([kk, `<span style="color:${lc}">${kk} 位以内（${dash === TRIPLE[0][1] ? "破線" : "点線"}）${fmtArea(sphericalArea(Rk.latlng))} km²</span>`]);
+      extra.push([t.k, `<span style="color:${lc}">${t.k} 位以内（${t.m === "base" ? "点線" : "破線"}）${fmtArea(sphericalArea(Rk.latlng))} km²</span>`]);
     }
     if (fly && !st.bootView) fitVisible(poly.getBounds(), { maxZoom: 13 });
     const area = sphericalArea(R.latlng);
@@ -1001,7 +1045,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       (isUa(st.sel) ? '<span class="badge">未取得</span>' : "") + (r[6] ? '<span class="badge cl">廃止</span>' : "") +
       `<button class="uab" id="uaToggleSel">${isUa(st.sel) ? "取得済みにする" : "未取得にする"}</button></div>` +
       // inner to outer (12, 16, 18), each in its rank color, separated by "／" (user: "・" was hard to see)
-      `<div class="ar">${[...extra, [st.k, `<span style="color:${tri ? TIER[2] : TIER[0]}">${st.k} 位以内 ${fmtArea(area)} km²</span>`]].sort((a, b) => a[0] - b[0]).map((x, j, arr) => j < arr.length - 1 ? x[1].replace(/<\/span>$/, '<i class="sep">／</i></span>') : x[1]).join("")}</div>` +
+      `<div class="ar">${[...extra, [st.k, `<span style="color:${outC}">${st.k === 1 ? "位置登録で取れる範囲" : st.k + " 位以内"} ${fmtArea(area)} km²</span>`]].sort((a, b) => a[0] - b[0]).map((x, j, arr) => j < arr.length - 1 ? x[1].replace(/<\/span>$/, '<i class="sep">／</i></span>') : x[1]).join("")}</div>` +
       `<div class="fig">計算 ${(R.ms ?? ms).toFixed(1)} ms・二等分線 ${R.lines} 本・頂点 ${R.local.length} 個</div>`;
     syncBars();
     if ($("levels").checked) drawLevels(); else { st.levelJob++; cancelAsync("lv"); }
@@ -1423,38 +1467,113 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   geoCtl.addTo(map); geoCtl.update();
   // map buttons for the view: [rank numbers] [three-fold view] [clear the selection] (the same as the panel's items)
   const ICON_MARKS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M10 9.2 12.6 7.5V16.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const ICON_MULTI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="10" r="6"/><circle cx="15" cy="10" r="6"/><circle cx="12" cy="15" r="6"/><path d="M12 10.6a6 6 0 0 1 0 .01" stroke-width="3" stroke-linecap="round"/></svg>';
   const ICON_TRIPLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="6" stroke-dasharray="3 2"/><circle cx="12" cy="12" r="2.5" stroke-dasharray="1 1.6"/></svg>';
   const ICON_CLEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3 2.4"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/></svg>';
+  const ctlBtn = (box, html, fn) => {
+    const a = L.DomUtil.create("a", "", box); a.href = "#"; a.setAttribute("role", "button"); a.innerHTML = html;
+    L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); fn(); });
+    return a;
+  };
+  // [selected station's area in tiers][rank numbers][multi-station mode] as one group (user)
   viewCtl.onAdd = () => {
     const box = L.DomUtil.create("div", "leaflet-bar geo-ctl view-ctl");
-    const mk = (html, fn) => {
-      const a = L.DomUtil.create("a", "", box); a.href = "#"; a.setAttribute("role", "button"); a.innerHTML = html;
-      L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); fn(); });
-      return a;
-    };
     const flip = (id) => { const e = $(id); e.checked = !e.checked; e.dispatchEvent(new Event("change")); viewCtl.update(); };
-    viewCtl.marks = mk(ICON_MARKS, () => flip("radarMarks"));
-    viewCtl.triple = mk(ICON_TRIPLE, () => flip("triple"));
-    viewCtl.clear = mk(ICON_CLEAR, () => grpClearable() ? clearGroupAll() : shownSel() >= 0 && clearSel());
+    viewCtl.triple = ctlBtn(box, ICON_TRIPLE, () => flip("triple"));
+    viewCtl.marks = ctlBtn(box, ICON_MARKS, () => flip("radarMarks"));
+    viewCtl.multi = ctlBtn(box, ICON_MULTI, () => setGroupMode(!$("grpMode").checked));
     L.DomEvent.disableClickPropagation(box);
+    return box;
+  };
+  clearCtl.onAdd = () => {
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl clear-ctl");
+    viewCtl.clear = ctlBtn(box, ICON_CLEAR, () => grpClearable() ? clearGroupAll() : shownSel() >= 0 && clearSel());
+    L.DomEvent.disableClickPropagation(box);
+    setTimeout(() => viewCtl.update(), 0); // after boot (grpClearable etc. are defined further down)
     return box;
   };
   viewCtl.update = () => {
     if (!viewCtl.marks) return;
-    const m = $("radarMarks").checked, t = $("triple").checked;
+    const m = $("radarMarks").checked, t = $("triple").checked, on = $("grpMode").checked;
     viewCtl.marks.classList.toggle("on", m); viewCtl.marks.setAttribute("aria-pressed", String(m));
     viewCtl.marks.title = `レーダーに入る駅に順位の番号：${m ? "オン" : "オフ"}`;
     viewCtl.triple.classList.toggle("on", t); viewCtl.triple.setAttribute("aria-pressed", String(t));
-    viewCtl.triple.title = `三重表示（k・k−2・k−6）：${t ? "オン" : "オフ"}`;
-    // in the multi-station mode it clears the whole group (and the selection); otherwise the selected station
-    const g = grpClearable();
-    // nothing to clear: shown faint and inert rather than hidden (user's preference: the buttons keep their places)
-    const none = !g && shownSel() < 0; // in the multi-station mode only the group counts
-    viewCtl.clear.classList.toggle("disabled", none); viewCtl.clear.setAttribute("aria-disabled", String(none));
-    viewCtl.clear.title = none ? "解除する駅はありません" : g ? "グループの駅をすべて解除" : "選んだ駅の選択を解除";
-    for (const a of [viewCtl.marks, viewCtl.triple, viewCtl.clear]) a.setAttribute("aria-label", a.title);
+    viewCtl.triple.title = `選択駅の登録可能エリアを使う手段ごとに塗り分け：${t ? "オン" : "オフ"}`;
+    viewCtl.multi.classList.toggle("on", on); viewCtl.multi.setAttribute("aria-pressed", String(on));
+    viewCtl.multi.title = `複数選択モード：${on ? "オン（駅のタップでグループに追加・削除）" : "オフ"}${grp.ids.length ? `・${grp.ids.length} 駅` : ""}`;
+    if (viewCtl.clear) {
+      // in the multi-station mode it clears the whole group; otherwise the selected station
+      const g = grpClearable();
+      // nothing to clear: shown faint and inert rather than hidden (user's preference: the buttons keep their places)
+      const none = !g && shownSel() < 0; // in the multi-station mode only the group counts
+      viewCtl.clear.classList.toggle("disabled", none); viewCtl.clear.setAttribute("aria-disabled", String(none));
+      viewCtl.clear.title = none ? "解除する駅はありません" : g ? "グループの駅をすべて解除" : "選んだ駅の選択を解除";
+      viewCtl.clear.setAttribute("aria-label", viewCtl.clear.title);
+    }
+    for (const a of [viewCtl.marks, viewCtl.triple, viewCtl.multi]) a.setAttribute("aria-label", a.title);
   };
-  viewCtl.addTo(map);
+  multiCtl.update = () => viewCtl.update();
+  // the radar: [−][base][＋][radar][booster][natsume]. A column in the wide layout (＋ on top); in compact mode only the
+  // count, which floats the six (with a close button) out to its left (user)
+  const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5" stroke-width="1.3"/><path d="M12 2.5v19M2.5 12h19" stroke-width="1.2"/><path d="M12 12 18.7 5.3A9.5 9.5 0 0 1 21.5 12z" fill="currentColor" fill-opacity=".55" stroke="none"/><path d="M12 12 18.7 5.3" stroke-width="2" stroke-linecap="round"/></svg>';
+  const ICON_BOOSTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="14" r="7.5"/><circle cx="10" cy="14" r="3.6" stroke-width="1.2"/><path d="M10 6.5v15M2.5 14h15" stroke-width="1.1"/><path d="M10 14l5.3-5.3A7.5 7.5 0 0 1 17.5 14z" fill="currentColor" fill-opacity=".55" stroke="none"/><path d="M19 1.8v6.4M15.8 5h6.4" stroke-width="2.2" stroke-linecap="round"/></svg>';
+  // natsume (provisional, user): twin tails with ribbons
+  const ICON_NATSUME = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8.6" r="4.8"/><rect x="10.6" y="12" width="2.8" height="4" rx="1"/><path d="M5.5 22c.4-3.4 2.9-5.6 6.5-5.6s6.1 2.2 6.5 5.6z"/><path d="M7.5 7.4C4.9 8.2 4 11.4 4.5 14.4c.3 1.5.9 2.6 1.8 3-.2-1.8 0-4.1 1-6.1.4-.8.8-1.5 1.2-2z"/><path d="M16.5 7.4c2.6.8 3.5 4 3 7-.3 1.5-.9 2.6-1.8 3 .2-1.8 0-4.1-1-6.1-.4-.8-.8-1.5-1.2-2z"/><path d="M7.4 5.8 4.4 4.2v3.4zM7.4 5.8l2.6-1.9-.3 3.3zM16.6 5.8l3-1.6v3.4zM16.6 5.8 14 3.9l.3 3.3z"/></svg>';
+  radarCtl.onAdd = () => {
+    const compact = document.body.classList.contains("compact");
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl radar-ctl" + (compact ? " compact" : ""));
+    const six = (host, horiz) => {
+      const minus = () => ctlBtn(host, "−", () => setRadarBase(st.radar.base - 1)), plus = () => ctlBtn(host, "＋", () => setRadarBase(st.radar.base + 1));
+      const b = {};
+      if (horiz) { b.minus = minus(); b.count = ctlBtn(host, "", () => radarCtl.toggle(false)); b.plus = plus(); }
+      else { b.plus = plus(); b.count = ctlBtn(host, "", () => {}); b.minus = minus(); }
+      b.radar = ctlBtn(host, ICON_RADAR, () => toggleMeans("radar"));
+      b.booster = ctlBtn(host, ICON_BOOSTER, () => toggleMeans("booster"));
+      b.natsume = ctlBtn(host, ICON_NATSUME, () => toggleMeans("natsume"));
+      if (horiz) b.close = ctlBtn(host, "×", () => radarCtl.toggle(false));
+      for (const k of ["minus", "plus"]) b[k].classList.add("pm");
+      b.count.classList.add("cnt"); if (b.close) b.close.classList.add("pm", "x");
+      return b;
+    };
+    radarCtl.btns = [];
+    if (!compact) radarCtl.btns.push(six(box, false));
+    else {
+      const cnt = ctlBtn(box, "", () => radarCtl.toggle()); cnt.classList.add("cnt");
+      const pop = L.DomUtil.create("div", "radar-pop", box); pop.hidden = true;
+      radarCtl.pop = pop; radarCtl.btns.push({ count: cnt }, six(pop, true));
+    }
+    L.DomEvent.disableClickPropagation(box); L.DomEvent.disableScrollPropagation(box);
+    radarCtl.box = box;
+    setTimeout(() => radarCtl.update(), 0);
+    return box;
+  };
+  radarCtl.toggle = (open) => {
+    if (!radarCtl.pop) return;
+    radarCtl.pop.hidden = open === undefined ? !radarCtl.pop.hidden : !open;
+    radarCtl.box.classList.toggle("open", !radarCtl.pop.hidden);
+  };
+  // a tap anywhere else closes the floating six
+  document.addEventListener("pointerdown", (e) => { if (radarCtl.pop && !radarCtl.pop.hidden && !radarCtl.box.contains(e.target)) radarCtl.toggle(false); }, true);
+  radarCtl.update = () => {
+    if (!radarCtl.btns) return;
+    const R = st.radar;
+    for (const b of radarCtl.btns) {
+      const dots = R.radar ? (R.booster ? `<i style="background:${TIER[1]}"></i>` : "") + (R.natsume ? `<i style="background:${TIER[2]}"></i>` : "") : "";
+      b.count.innerHTML = `<b>${R.base}</b>${dots ? `<span class="dots">${dots}</span>` : ""}`;
+      b.count.classList.toggle("off", !R.radar);
+      b.count.title = !R.radar ? "レーダーを使わない（位置登録のみ）" : `素の検知駅数 ${R.base}・最大 ${st.k} 駅`;
+      if (!b.radar) continue;
+      for (const [k, c, name] of [["radar", 0, "レーダーを使う"], ["booster", 1, "レーダーブースター（+4）"], ["natsume", 2, "なつめのスキル（+2）"]]) {
+        const on = R[k], dep = k !== "radar" && !R.radar;
+        b[k].classList.toggle("on", on && !dep); b[k].classList.toggle("disabled", dep);
+        b[k].style.background = on && !dep ? TIER[c] : ""; b[k].setAttribute("aria-pressed", String(on));
+        b[k].title = `${name}：${on ? "オン" : "オフ"}`; b[k].setAttribute("aria-label", b[k].title);
+      }
+      b.minus.title = "素の検知駅数を 1 減らす"; b.plus.title = "素の検知駅数を 1 増やす";
+      b.minus.classList.toggle("disabled", R.base <= 2); b.plus.classList.toggle("disabled", R.base >= 30);
+    }
+  };
+  viewCtl.addTo(map); clearCtl.addTo(map); radarCtl.addTo(map);
   const grpClearable = () => $("grpMode").checked && grp.ids.length > 0;
   // clear the group (multi-station mode), undoable for UNDO_MS. The selection is left alone: it is not shown in the mode
   function clearGroupAll() {
@@ -1598,22 +1717,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const b = e.target.closest(".chip"); if (!b) return;
     const i = st.rows.findIndex(r => r[0] === +b.dataset.id); if (i >= 0) toggleGroup(i);
   });
-  // map button: multi-station mode on / off (the panel is often out of reach in split screen)
-  const ICON_MULTI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="10" r="6"/><circle cx="15" cy="10" r="6"/><circle cx="12" cy="15" r="6"/><path d="M12 10.6a6 6 0 0 1 0 .01" stroke-width="3" stroke-linecap="round"/></svg>';
-  multiCtl.onAdd = () => {
-    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl multi-ctl");
-    const a = L.DomUtil.create("a", "", box); a.href = "#"; a.setAttribute("role", "button"); a.innerHTML = ICON_MULTI;
-    L.DomEvent.on(a, "click", (e) => { L.DomEvent.stop(e); setGroupMode(!$("grpMode").checked); });
-    L.DomEvent.disableClickPropagation(box); multiCtl.btn = a;
-    return box;
-  };
-  multiCtl.update = () => {
-    if (!multiCtl.btn) return;
-    const on = $("grpMode").checked;
-    multiCtl.btn.classList.toggle("on", on); multiCtl.btn.setAttribute("aria-pressed", String(on));
-    multiCtl.btn.title = `複数選択モード：${on ? "オン（駅のタップでグループに追加・削除）" : "オフ"}${grp.ids.length ? `・${grp.ids.length} 駅` : ""}`;
-    multiCtl.btn.setAttribute("aria-label", multiCtl.btn.title);
-  };
+  // the multi-station mode button is in viewCtl (the panel is often out of reach in split screen)
   function setGroupMode(on) {
     $("grpMode").checked = on;
     try { localStorage.setItem("grpMode", on ? "1" : "0"); } catch (e) {}
@@ -1623,7 +1727,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     toast(on ? "複数選択モード：駅をタップするとグループに追加・削除します" : "複数選択モードを終えました（グループは残ります）");
   }
   $("grpMode").addEventListener("change", () => setGroupMode($("grpMode").checked));
-  multiCtl.addTo(map); multiCtl.update();
+  multiCtl.update();
   try {
     const g = JSON.parse(localStorage.getItem("group") || "[]"); if (Array.isArray(g)) grp.ids = g.filter(Number.isFinite).slice(0, GRP_MAX);
     if (localStorage.getItem("grpMode") === "1") { $("grpMode").checked = true; multiCtl.update(); }
@@ -1777,17 +1881,35 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
 
   // ---------------- controls
-  function setK(v) {
-    v = Math.max(1, Math.min(500, Math.round(+v || 1)));
-    st.k = v; $("kn").value = v; $("kr").value = Math.min(K_SLIDER_MAX, v);
-    redraw(false);
+  // the radar settings → st.k, the panel and the map buttons; then redraw (and the hash keeps the id / k for sharing)
+  function radarUi() {
+    const R = st.radar, tiers = radarTiers();
+    $("kn").value = R.base; $("kr").value = Math.min(12, R.base);
+    for (const [id, key, c] of [["useRadar", "radar", 0], ["useBooster", "booster", 1], ["useNatsume", "natsume", 2]]) {
+      const b = $(id), on = R[key], dep = key !== "radar" && !R.radar;
+      b.classList.toggle("on", on && !dep); b.setAttribute("aria-pressed", String(on)); b.disabled = dep;
+      b.style.background = on && !dep ? TIER[c] : ""; b.style.opacity = dep ? 0.45 : "";
+    }
+    $("kSum").innerHTML = !R.radar ? "レーダーを使わない：位置登録で取れる範囲（1 駅）だけを描きます。"
+      : `最大 <b style="color:${TIER[MEANS_TIER[tiers[tiers.length - 1].m]]}">${st.k}</b> 駅` + (tiers.length > 1 ? "　" + tiers.map(t => `<span style="color:${TIER[MEANS_TIER[t.m]]}">${t.k}</span>`).join("／") : "");
+    if (radarCtl.update) radarCtl.update();
+  }
+  function applyRadar() {
+    st.k = radarTiers().slice(-1)[0].k;
+    try { localStorage.setItem("radarCfg", JSON.stringify(st.radar)); } catch (e) {}
+    radarUi(); redraw(false);
     if (st.sel >= 0) try { history.replaceState(null, "", `#id=${st.rows[st.sel][0]}&k=${st.k}&m=${st.metric}`); } catch (e) {}
   }
-  const K_SLIDER_MAX = 18; // the game's radar tops out at 18; more (events) via the number field or − / ＋
-  $("kr").addEventListener("input", () => { $("kn").value = $("kr").value; st.k = +$("kr").value; redraw(false); });
-  $("kMinus").addEventListener("click", () => setK(st.k - 1));
-  $("kPlus").addEventListener("click", () => setK(st.k + 1));
-  $("kn").addEventListener("change", () => setK($("kn").value));
+  // the base: 2..12 from the friends online; up to 30 by hand (events add more)
+  function setRadarBase(v) { st.radar.base = Math.max(2, Math.min(30, Math.round(+v || 2))); applyRadar(); }
+  function toggleMeans(key) { st.radar[key] = !st.radar[key]; applyRadar(); }
+  $("kr").addEventListener("input", () => setRadarBase($("kr").value));
+  $("kMinus").addEventListener("click", () => setRadarBase(st.radar.base - 1));
+  $("kPlus").addEventListener("click", () => setRadarBase(st.radar.base + 1));
+  $("kn").addEventListener("change", () => setRadarBase($("kn").value));
+  $("useRadar").addEventListener("click", () => toggleMeans("radar"));
+  $("useBooster").addEventListener("click", () => toggleMeans("booster"));
+  $("useNatsume").addEventListener("click", () => toggleMeans("natsume"));
   $("metric").addEventListener("change", () => { st.metric = $("metric").value; redraw(false); drawVor(); });
   $("clip").addEventListener("change", () => { st.clip = +$("clip").value; redraw(false); drawVor(); });
   // ---------------- map look: base map, railway overlay, fading (kept in localStorage "mapLook")
@@ -1899,14 +2021,15 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     document.body.classList.toggle("compact", on);
     // zoom and view buttons: on the left (under the nearest station) in compact mode (the menu button is at the
     // bottom right), else back to the right column
-    for (const c of [zoomCtl, viewCtl, multiCtl]) c.setPosition(on ? "topleft" : "topright");
-    viewCtl.update(); multiCtl.update(); // setPosition re-runs onAdd: new buttons, without their state (on / disabled)
+    for (const c of [zoomCtl, viewCtl, clearCtl]) c.setPosition(on ? "topleft" : "topright");
+    radarCtl.setPosition("topright"); // rebuilt: a column, or only the count with the floating six
+    viewCtl.update(); radarCtl.update(); // setPosition re-runs onAdd: new buttons, without their state (on / disabled)
     arrangeControls();
     map.invalidateSize(); syncBars();
   }
   // right column, top to bottom: layers, zoom, location, view (the big layer button at the top, not in the middle)
   function arrangeControls() {
-    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl, multiCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
+    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl, clearCtl, radarCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
   }
   try { const cm = localStorage.getItem("compactMode"); if (["auto", "on", "off"].includes(cm)) $("compactMode").value = cm; } catch (e) {}
   $("compactMode").addEventListener("change", () => { try { localStorage.setItem("compactMode", $("compactMode").value); } catch (e) {} applyCompact(); });
@@ -2233,7 +2356,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   try { const v = JSON.parse(localStorage.getItem("view") || "null"); if (Array.isArray(v) && v.length === 3 && v.every(Number.isFinite)) savedView = v; } catch (e) {}
   st.bootView = !!savedView; // while booting, selecting a station must not fly away from the saved view
   const hp = new URLSearchParams(location.hash.slice(1));
-  if (hp.get("k")) { st.k = Math.max(1, Math.min(500, +hp.get("k") || 18)); $("kn").value = st.k; $("kr").value = Math.min(18, st.k); }
+  radarUi(); // the hash's k is not applied: st.k follows the saved radar settings
   if (["flat", "cos", "sphere"].includes(hp.get("m"))) { st.metric = hp.get("m"); $("metric").value = st.metric; }
   try {
     $("vor1").checked = localStorage.getItem("vor1") === "1";
