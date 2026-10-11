@@ -211,6 +211,9 @@ input[type=range] { width: 100%; accent-color: var(--region); touch-action: none
 .stats dt { color: var(--muted); }
 .stats dd { margin: 0; text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .note { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+/* a note that explains the item above it: indented with a thin rule on the left, so it reads as belonging to it (user).
+   Not: a section's intro (right after its summary), a result (#kSum), a note about the whole section (.whole) */
+details.sec div.note:not(summary + .note):not(#kSum):not(.whole):not(:empty) { margin-left: 14px; padding-left: 8px; border-left: 2px solid var(--rule); }
 .btn { font: inherit; font-size: 12.5px; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 6px 10px; cursor: pointer; }
 .btn:hover { border-color: var(--muted); }
 :focus-visible { outline: 2px solid var(--region); outline-offset: 1px; }
@@ -423,7 +426,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
         <option value="off" data-s="追従オフ">追従をやめる（ボタンで再開）</option>
       </select>
     </div>
-    <div class="note">指定位置：地図を長押し（PC は右クリック）した地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
+    <div class="note whole">指定位置：地図を長押し（PC は右クリック）した地点を現在地とみなします（選んでいる駅の上では、取得済み／未取得の切り替えになります）。</div>
   </details>
 
   <details class="sec" data-sec="map">
@@ -540,7 +543,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
       <div class="note">平面：緯度・経度をそのまま平面とみなす（既定）。cos 36°：経度を cos 36° で縮める。球面：大圏距離。</div>
     </div>
-    <label class="check"><input type="checkbox" id="realDist" checked> 駅の距離を実距離で表示する</label>
+    <label class="check"><input type="checkbox" id="realDist" checked> 駅の距離は測り方によらず実距離で表示する</label>
     <div class="note">最寄り駅の表示と一覧の距離。オフにすると上の測り方で測った距離（緯度 1° を約 111.2 km として換算）を出し、距離の並びが順位と一致します。</div>
     <div class="field">
       <div class="label">計算範囲（駅からの四角い窓）</div>
