@@ -393,7 +393,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
     </div>
     <label class="check"><input type="checkbox" id="nearOn"> 最寄り駅名を常に表示</label>
-    <label class="check"><input type="checkbox" id="hideClosed"> 廃駅を隠す</label>
+    <label class="check"><input type="checkbox" id="closedDist" checked> 廃駅を区別して表示する</label>
+    <div class="note">駅データで廃止になっている駅の点と駅名を灰色で描きます。駅メモでは廃駅も現役の駅と同じに扱われるので、計算には常に含めます。</div>
     <label class="check"><input type="checkbox" id="uaHi" checked> 未取得駅を強調表示</label>
     <label class="check sub-check" data-dep="uaHi"><input type="checkbox" id="uaFill"> 未取得駅を取れる範囲を表示</label>
     <label class="check"><input type="checkbox" id="triple"> 選択駅の登録可能エリアを、使う手段ごとに塗り分ける</label>
@@ -749,14 +750,16 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // ---------------- data
   function loadRows(rows, version) {
     st.all = rows; st.version = version;
-    applyFilter(false);
+    setStationSet(false);
   }
-  function applyFilter(keepSel) {
+  // the only place that changes the station set (loading the data, 駅データ更新). Closed stations are always in it:
+  // the game treats them like any other station (the user); they are only drawn differently (closedShown)
+  function setStationSet(keepSel) {
     const prevId = st.sel >= 0 ? st.rows[st.sel][0] : null;
-    st.rows = !$("hideClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
+    st.rows = st.all;
     const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
     st.idx = makeIndex(lat, lng);
-    // the only place that changes the station set: a new generation (part of every region key, see regionEnv)
+    // a new station set: a new generation (part of every region cache key, see regionEnv)
     st.cache.clear(); st.lcache.clear(); st.gen++;
     if (worker) worker.postMessage({ type: "data", gen: st.gen, lat, lng });
     drawStations();
@@ -781,6 +784,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const paleOf = (c, def, pale) => c.toLowerCase() === def ? pale : "#" + [1, 3, 5].map(j => Math.round(parseInt(c.slice(j, j + 2), 16) * 0.45 + 255 * 0.55).toString(16).padStart(2, "0")).join("");
   const stnPale = () => paleOf(C.stn, COLOR_DEFAULT.stn, "#eaa98b"), closedPale = () => paleOf(C.closed, COLOR_DEFAULT.closed, "#c8ccd4");
   const isUa = (i) => st.ua.has(st.rows[i][2]);
+  // closed stations drawn differently (grey dots and names; unacquired: their own color) only while "closedDist" is on.
+  // The text marks (（廃駅）, 廃止, （廃）) always stay: plain information
+  const closedShown = (r) => r[6] && $("closedDist").checked;
   // the selected station as drawn: none in the multi-station mode (it means nothing there and its ring covered the
   // group's purple one; its area, three-fold lines and contour lines are hidden too). Kept, and back on leaving the mode
   const shownSel = () => $("grpMode").checked ? -1 : st.sel;
@@ -792,7 +798,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
       // with a list loaded, acquired stations recede: a pale solid color (not a translucent fill, which blurred the dots
       // and let the white rims of crowded dots read as rings)
-      fillColor: ua ? (r[6] ? C.uaClosed : C.ua) : hi && !sel ? (r[6] ? closedPale() : stnPale()) : (r[6] ? C.closed : C.stn),
+      fillColor: ua ? (closedShown(r) ? C.uaClosed : C.ua) : hi && !sel ? (closedShown(r) ? closedPale() : stnPale()) : (closedShown(r) ? C.closed : C.stn),
       fillOpacity: 0.95,
     };
   }
@@ -921,7 +927,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const lvOpacity = (f) => 1 - (2 / 3) * f; // f = j / k
 
   // ---------------- region computation (cached)
-  // Everything a region depends on besides the station and k: the station set (st.gen, advanced by applyFilter, the
+  // Everything a region depends on besides the station and k: the station set (st.gen, advanced by setStationSet, the
   // only place that changes the set), the metric and the clip window. Every cache of regions is keyed by all of them
   // and the worker gets them with each job (its Delaunay cells are keyed by them too), so a change of any of them can
   // never reuse an old result even if a cache is not cleared. A new input that changes regions goes into
@@ -1149,8 +1155,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
         ctx.strokeText(r[2], x, y); ctx.fillStyle = color(r); ctx.fillText(r[2], x, y);
       }
     };
-    draw(all, 12, 6, (r) => r[6] ? "#687089" : "#1d2433");
-    draw(ua, 12, 7, (r) => r[6] ? C.uaClosed : C.ua);
+    draw(all, 12, 6, (r) => closedShown(r) ? "#687089" : "#1d2433");
+    draw(ua, 12, 7, (r) => closedShown(r) ? C.uaClosed : C.ua);
     draw(grpIdx(), 13, 11, () => C.grp);
     if (shownSel() >= 0 && st.rows[shownSel()]) draw([shownSel()], 14, 13, () => C.stn);
     if ($("vorNames").checked) drawVorNames(ctx);
@@ -2068,7 +2074,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   });
   $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
   $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; cancelAsync("view"); viewLayer.clearLayers(); } });
-  $("hideClosed").addEventListener("change", () => applyFilter(true));
+  $("closedDist").addEventListener("change", () => {
+    try { localStorage.setItem("closedDist", $("closedDist").checked ? "1" : "0"); } catch (e) {}
+    drawStations(); updateLabels(); renderUaList();
+  });
   function setFolded(c) {
     $("panel").classList.toggle("collapsed", c); document.body.classList.toggle("folded", c); syncBars();
     $("fold").querySelector(".fold-txt").textContent = c ? "ひらく" : "たたむ";
@@ -2247,7 +2256,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     } else ids.sort((a, b) => st.rows[a][7] - st.rows[b][7] || st.rows[a][3].localeCompare(st.rows[b][3], "ja"));
     $("uaList").innerHTML = ids.map(i => {
       const r = st.rows[i], sub = from ? fmtKm(st.uaDist.get(i)) : (PREF[r[7]] || "");
-      return `<li><button type="button" data-i="${i}"><span class="${r[6] ? "c" : ""}">${esc(r[2])}</span><span class="d">${sub}</span></button></li>`;
+      return `<li><button type="button" data-i="${i}"><span class="${closedShown(r) ? "c" : ""}">${esc(r[2])}</span><span class="d">${sub}</span></button></li>`;
     }).join("");
     $("uaList").title = from ? `${from}からの距離` : "";
   }
@@ -2299,7 +2308,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     st.ua = next; saveUa();
     $("uaInfo").textContent = `${f.name} から未取得 ${next.size} 駅を読み込みました。` +
       (unknown.length ? `駅データにない駅名（${unknown.length}）：${unknown.slice(0, 20).join("・")}${unknown.length > 20 ? " ほか" : ""}` : "すべての駅名が駅データと一致しました。");
-    applyFilter(true); // closed unacquired stations must be present even when closed ones are hidden
+    redraw(false); uaChanged(false); // redraw: the dots and the unacquired areas
   });
   $("uaExport").addEventListener("click", () => {
     if (!st.ua.size) { toast("未取得駅がありません。"); return; }
@@ -2314,7 +2323,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   $("uaClear").addEventListener("click", () => {
     if (!st.ua.size || !confirm(`未取得駅（${st.ua.size} 駅）をすべて消しますか？（先に「CSV に書き出す」で保存できます）`)) return;
     st.ua = new Map(); saveUa(); $("uaInfo").textContent = "";
-    applyFilter(true);
+    redraw(false); uaChanged(false);
   });
 
   // ---------------- line style editor
@@ -2462,6 +2471,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const bz = localStorage.getItem("bndZoom"); if (bz !== null && [...$("bndZoom").options].some(o => o.value === bz)) $("bndZoom").value = bz;
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
     $("realDist").checked = localStorage.getItem("realDist") !== "0";
+    $("closedDist").checked = localStorage.getItem("closedDist") !== "0";
     $("fastVor").checked = localStorage.getItem("fastVor") !== "0";
     $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
     const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
