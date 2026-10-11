@@ -1571,13 +1571,17 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   document.addEventListener("pointerdown", (e) => { if (radarCtl.pop && !radarCtl.pop.hidden && !radarCtl.box.contains(e.target)) radarCtl.toggle(false); }, true);
   radarCtl.update = () => {
     if (!radarCtl.btns) return;
-    const R = st.radar;
+    const R = st.radar, tiers = radarTiers(), top = tiers[tiers.length - 1];
+    // the count shows what the radar reaches now (base + the means; user), in the outermost means' color. The − / + still
+    // step the base (2–30), so the reachable range shifts with the means
+    const parts = `素 ${R.base}` + (R.radar && R.booster ? "＋ブースター 4" : "") + (R.radar && R.natsume ? "＋なつめ 2" : "");
+    const shown = R.radar ? st.k : R.base, col = R.radar ? TIER[MEANS_TIER[top.m]] : "";
     for (const b of radarCtl.btns) {
       const dots = R.radar ? (R.booster ? `<i style="background:${TIER[1]}"></i>` : "") + (R.natsume ? `<i style="background:${TIER[2]}"></i>` : "") : "";
       // the dots only on the lone count button (compact, closed): next to the six the means buttons show it
-      b.count.innerHTML = `<b>${R.base}</b>${dots && !b.plus ? `<span class="dots">${dots}</span>` : ""}`;
+      b.count.innerHTML = `<b${col ? ` style="color:${col}"` : ""}>${shown}</b>${dots && !b.plus ? `<span class="dots">${dots}</span>` : ""}`;
       b.count.classList.toggle("off", !R.radar);
-      b.count.title = !R.radar ? "レーダーを使わない（位置登録のみ）" : `素の検知駅数 ${R.base}・最大 ${st.k} 駅`;
+      b.count.title = !R.radar ? `レーダーを使わない（位置登録のみ。素の検知駅数 ${R.base}）` : `最大 ${st.k} 駅（${parts}）`;
       if (!b.radar) continue;
       for (const [k, c, name] of [["radar", 0, "レーダーを使う"], ["booster", 1, "レーダーブースター（+4）"], ["natsume", 2, "なつめのスキル（+2）"]]) {
         const on = R[k], dep = k !== "radar" && !R.radar;
@@ -1585,7 +1589,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
         b[k].style.background = on && !dep ? TIER[c] : ""; b[k].setAttribute("aria-pressed", String(on));
         b[k].title = `${name}：${on ? "オン" : "オフ"}`; b[k].setAttribute("aria-label", b[k].title);
       }
-      b.minus.title = "素の検知駅数を 1 減らす"; b.plus.title = "素の検知駅数を 1 増やす";
+      b.minus.title = `素の検知駅数を 1 減らす（いま ${parts}）`; b.plus.title = `素の検知駅数を 1 増やす（いま ${parts}）`;
       b.minus.classList.toggle("disabled", R.base <= 2); b.plus.classList.toggle("disabled", R.base >= 30);
     }
   };
