@@ -199,7 +199,8 @@ input[type=range] { width: 100%; accent-color: var(--region); touch-action: none
 .search { position: relative; }
 .sugg { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; background: #fff; border: 1px solid var(--rule); border-top: none; border-radius: 0 0 4px 4px; max-height: 260px; overflow: auto; }
 .sugg button { display: flex; width: 100%; justify-content: space-between; gap: 8px; border: none; background: none; padding: 7px 9px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
-.sugg button:hover, .sugg button.on { background: #eef2f8; }
+.sugg button.on { background: #eef2f8; }
+@media (hover: hover) { .sugg button:hover { background: #eef2f8; } }
 .sugg small { color: var(--muted); }
 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.4; }
 .check.sub-check { margin-left: 22px; font-size: 12.5px; }
@@ -215,7 +216,7 @@ input[type=range] { width: 100%; accent-color: var(--region); touch-action: none
    Not: a section's intro (right after its summary), a result (#kSum), a note about the whole section (.whole) */
 details.sec div.note:not(summary + .note):not(#kSum):not(.whole):not(:empty) { margin-left: 14px; padding-left: 8px; border-left: 2px solid var(--rule); }
 .btn { font: inherit; font-size: 12.5px; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 4px; padding: 6px 10px; cursor: pointer; }
-.btn:hover { border-color: var(--muted); }
+@media (hover: hover) { .btn:hover { border-color: var(--muted); } }
 :focus-visible { outline: 2px solid var(--region); outline-offset: 1px; }
 .rank { font-size: 12.5px; min-width: 200px; }
 .rank h3 { font-size: 13px; margin: 0 0 6px; }
@@ -228,7 +229,7 @@ details.sec div.note:not(summary + .note):not(#kSum):not(.whole):not(:empty) { m
 .leaflet-container { font-family: var(--font-body); }
 .ualist { margin: 0; padding: 0; list-style: none; max-height: 240px; overflow: auto; display: grid; gap: 1px; font-size: 12.5px; }
 .ualist button { display: grid; grid-template-columns: 1fr auto; gap: 8px; width: 100%; border: none; background: none; padding: 4px 6px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; border-radius: 3px; }
-.ualist button:hover { background: #f3eef6; }
+@media (hover: hover) { .ualist button:hover { background: #f3eef6; } }
 .ualist .d { font-family: var(--font-data); font-variant-numeric: tabular-nums; color: var(--muted); }
 .ualist .c { color: var(--ua-closed); }
 .badge { display: inline-block; font-size: 11px; color: #fff; background: var(--ua); border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: 2px; }
@@ -303,7 +304,13 @@ details.sub[open] > summary { margin-bottom: 4px; }
 .geo-ctl a svg { width: 20px; height: 20px; }
 /* "on" in the color it stands for (--on: set by the button from the color settings, e.g. the group's purple; user) */
 .geo-ctl a.on { background: var(--on, var(--region)); color: #fff; }
-.geo-ctl a.on:hover { background: var(--on, var(--region)); filter: brightness(0.88); }
+@media (hover: hover) { .geo-ctl a.on:hover { background: var(--on, var(--region)); filter: brightness(0.88); } }
+/* no gray left on a tapped button (user): Leaflet grays a hovered or focused bar button (#f4f4f4); on touch screens the
+   "hover" sticks to the last tapped element and a tapped link keeps focus, both until something else is tapped.
+   Gray only while a mouse is over it, or for keyboard focus */
+.leaflet-bar a:not(.on):focus { background-color: #fff; }
+.leaflet-bar a:not(.on):focus-visible { background-color: #f4f4f4; }
+@media (hover: none) { .leaflet-bar a:not(.on):hover { background-color: #fff; } }
 .geo-ctl a.armed { color: var(--region); }
 .geo-ctl a[hidden] { display: none; }
 /* the radar buttons */
