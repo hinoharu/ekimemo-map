@@ -2,7 +2,7 @@
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const html = fs.readFileSync(path.join(__dirname, "..", "dist", "index.html"), "utf8");
 let errors = 0;
-for (const ph of ["/*CORE*/", "/*DATA*/", "/*VERSION*/", "/*BUILD*/"]) if (html.includes(ph)) { console.error(`placeholder ${ph} left in dist/index.html`); errors++; }
+for (const ph of ["/*CORE*/", "/*DATA*/", "/*VERSION*/", "/*BUILD*/", "/*DELAUNATOR*/"]) if (html.includes(ph)) { console.error(`placeholder ${ph} left in dist/index.html`); errors++; }
 const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 scripts.forEach((code, i) => {
   try { new vm.Script(code, { filename: `inline-script-${i}.js` }); }

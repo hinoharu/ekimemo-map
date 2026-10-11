@@ -151,11 +151,13 @@ def main():
         fetch_lines(version)
     template = (SRC / "index.template.html").read_text(encoding="utf-8")
     core = (SRC / "station_core.js").read_text(encoding="utf-8")
-    for ph in ("/*CORE*/", "/*DATA*/", "/*VERSION*/", "/*BUILD*/"):
+    # bundled (works offline): Delaunay triangulation for all order-1 regions at once (ISC license, notice kept in the file)
+    delaunator = (SRC / "vendor" / "delaunator.min.js").read_text(encoding="utf-8")
+    for ph in ("/*CORE*/", "/*DATA*/", "/*VERSION*/", "/*BUILD*/", "/*DELAUNATOR*/"):
         if template.count(ph) != 1:
             sys.exit(f"template must contain exactly one {ph}")
     data = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
-    html = template.replace("/*CORE*/", core).replace("/*VERSION*/", version).replace("/*DATA*/", data)
+    html = template.replace("/*DELAUNATOR*/", delaunator).replace("/*CORE*/", core).replace("/*VERSION*/", version).replace("/*DATA*/", data)
     DIST.mkdir(exist_ok=True)
     if (DATA / "lines.json").exists():
         shutil.copyfile(DATA / "lines.json", DIST / "lines.json")

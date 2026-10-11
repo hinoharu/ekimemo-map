@@ -298,4 +298,65 @@ function distKey(idx, metric, la, lo, t) {
   return dx * dx + dy * dy;
 }
 
-if (typeof module !== "undefined") module.exports = { makeIndex, regionOf, distKey, frameOf, candidates, traceLevel };
+// ---------------------------------------------------------------------------
+// Order-1 regions (Voronoi cells) of all stations at once, from a Delaunay triangulation (Delaunator is passed
+// in: the page bundles it, the tests require it). A cell's vertices are the circumcenters of the triangles
+// around the station. Only where it is certain to equal regionOf(…, k = 1): metric flat / cos (a plane;
+// cos is the same plane with longitude scaled), a station that is not on the hull and not at the same
+// position as another one, and a cell strictly inside its clip window (regionOf cuts it there). Others are
+// null: compute those with regionOf. Checked against regionOf for every station in tests/verify.js.
+function voronoiCells(Delaunator, idx, metric, clipDeg = 3) {
+  const t0 = (typeof performance !== "undefined" ? performance : Date).now();
+  const { n, lat, lng } = idx, cells = new Array(n).fill(null);
+  if (metric !== "flat" && metric !== "cos") return { cells, used: 0, ms: 0 };
+  const fx = metric === "cos" ? COS36 : 1, P = new Float64Array(2 * n);
+  for (let i = 0; i < n; i++) { P[2 * i] = lng[i] * fx; P[2 * i + 1] = lat[i]; }
+  const d = new Delaunator(P), { triangles, halfedges, hull } = d, nt = triangles.length / 3;
+  const cc = new Float64Array(2 * nt); // circumcenters
+  for (let t = 0; t < nt; t++) {
+    const a = triangles[3 * t], b = triangles[3 * t + 1], c = triangles[3 * t + 2];
+    const ax = P[2 * a], ay = P[2 * a + 1], bx = P[2 * b] - ax, by = P[2 * b + 1] - ay, cx = P[2 * c] - ax, cy = P[2 * c + 1] - ay;
+    const D = 2 * (bx * cy - by * cx), b2 = bx * bx + by * by, c2 = cx * cx + cy * cy;
+    cc[2 * t] = ax + (cy * b2 - by * c2) / D; cc[2 * t + 1] = ay + (bx * c2 - cx * b2) / D;
+  }
+  const inc = new Int32Array(n).fill(-1); // a half-edge ending at each point
+  for (let e = 0; e < triangles.length; e++) { const p = triangles[e % 3 === 2 ? e - 2 : e + 1]; if (inc[p] === -1) inc[p] = e; }
+  const skip = new Uint8Array(n);
+  for (const h of hull) skip[h] = 1;
+  const seen = new Map();
+  for (let i = 0; i < n; i++) { const key = P[2 * i] + "," + P[2 * i + 1]; if (seen.has(key)) skip[i] = skip[seen.get(key)] = 1; else seen.set(key, i); }
+  let used = 0;
+  for (let p = 0; p < n; p++) {
+    if (skip[p] || inc[p] < 0) continue;
+    const x0 = P[2 * p], y0 = P[2 * p + 1], poly = [], e0 = inc[p];
+    let e = e0, open = false;
+    do { // around p: triangle of e, then across the next edge of that triangle that leaves p
+      const t = (e / 3) | 0, u = cc[2 * t] - x0, v = cc[2 * t + 1] - y0, last = poly[poly.length - 1];
+      if (!last || Math.abs(u - last[0]) > 1e-12 || Math.abs(v - last[1]) > 1e-12) poly.push([u, v]); // 4+ cocircular: one vertex
+      e = halfedges[e % 3 === 2 ? e - 2 : e + 1];
+      if (e === -1) { open = true; break; }
+    } while (e !== e0);
+    if (open) continue;
+    if (poly.length > 1 && Math.abs(poly[0][0] - poly[poly.length - 1][0]) <= 1e-12 && Math.abs(poly[0][1] - poly[poly.length - 1][1]) <= 1e-12) poly.pop();
+    if (poly.length < 3) continue;
+    const [xmin, xmax, ymin, ymax] = frameOf(idx, p, metric, clipDeg).box;
+    if (!poly.every(([u, v]) => u > xmin && u < xmax && v > ymin && v < ymax)) continue;
+    let A = 0;
+    for (let i = 0; i < poly.length; i++) { const [a, b] = poly[i], [c, dd] = poly[(i + 1) % poly.length]; A += a * dd - b * c; }
+    if (A < 0) poly.reverse(); // counter-clockwise, like regionOf
+    cells[p] = poly; used++;
+  }
+  return { cells, used, ms: (typeof performance !== "undefined" ? performance : Date).now() - t0 };
+}
+// A cell from voronoiCells as regionOf returns it (densified the same way and mapped back to lat/lng)
+function cellRegion(idx, s, cell, metric, clipDeg = 3) {
+  const F = frameOf(idx, s, metric, clipDeg), out = [];
+  for (let q = 0; q < cell.length; q++) {
+    const [u0, v0] = cell[q], [u1, v1] = cell[(q + 1) % cell.length];
+    const segs = Math.max(1, Math.ceil(Math.hypot(u1 - u0, v1 - v0) / F.edgeStep));
+    for (let j = 0; j < segs; j++) out.push(F.toLatLng(u0 + (u1 - u0) * j / segs, v0 + (v1 - v0) * j / segs));
+  }
+  return { latlng: out, local: cell };
+}
+
+if (typeof module !== "undefined") module.exports = { makeIndex, regionOf, distKey, frameOf, candidates, traceLevel, voronoiCells, cellRegion };

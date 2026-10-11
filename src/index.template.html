@@ -302,6 +302,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 /* location buttons on the map (Leaflet control, under the zoom buttons) */
 .geo-ctl a { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; line-height: 0; color: var(--ink); cursor: pointer; }
 .geo-ctl a svg { width: 20px; height: 20px; }
+.debug-ctl a { font: 700 16px/1 var(--font-body); } /* (temporary) debug switch, "Δ" */
 /* "on" in the color it stands for (--on: set by the button from the color settings, e.g. the group's purple; user) */
 .geo-ctl a.on { background: var(--on, var(--region)); color: #fff; }
 @media (hover: hover) { .geo-ctl a.on:hover { background: var(--on, var(--region)); filter: brightness(0.88); } }
@@ -553,6 +554,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
     </div>
     <label class="check"><input type="checkbox" id="realDist" checked> 駅の距離は測り方によらず実距離で表示する</label>
     <div class="note">最寄り駅の表示と一覧の距離。オフにすると上の測り方で測った距離（緯度 1° を約 111.2 km として換算）を出し、距離の並びが順位と一致します。</div>
+    <label class="check"><input type="checkbox" id="fastVor" checked> 位置登録の範囲をまとめて計算する（高速）</label>
+    <div class="note">隣接駅間の境界線と未取得駅の位置登録の範囲を、全駅のドロネー三角形分割からまとめて求めます。結果は従来の計算と同じです（距離の測り方が球面のときと、外周や計算範囲の枠にかかる駅は従来の計算）。</div>
     <div class="field">
       <div class="label">計算範囲（駅からの四角い窓）</div>
       <select id="clip" aria-label="計算範囲">
@@ -586,6 +589,9 @@ details.sub[open] > summary { margin-bottom: 4px; }
 <button id="menuFab" class="menu-fab" aria-expanded="true" aria-label="メニューをたたむ"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script id="dl-src">
+/*DELAUNATOR*/
+</script>
 <script id="core-src">
 /*CORE*/
 </script>
@@ -927,9 +933,21 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // (~30 ms of work each) and are cached here (st.lcache: latlng only). A newer job on the same channel
   // replaces the older one in the worker. Without Worker support the same jobs run here in small slices.
   const WORKER_SRC = `
-    let idx = null, gen = -1, running = false; const jobs = new Map();
+    let idx = null, gen = -1, running = false, vc = null, vcKey = ""; const jobs = new Map();
+    // all order-1 regions at once (voronoiCells), built on first use for a metric / clip; null cells: regionOf
+    const cellsFor = (metric, clip) => {
+      if (vcKey !== metric + "|" + clip) {
+        vc = voronoiCells(Delaunator, idx, metric, clip); vcKey = metric + "|" + clip;
+        self.postMessage({ type: "cells", gen, metric, clip, used: vc.used, n: idx.n, ms: vc.ms });
+      }
+      return vc;
+    };
+    const region1 = (i, k, j) => {
+      if (k === 1 && j.fast && (j.metric === "flat" || j.metric === "cos")) { const c = cellsFor(j.metric, j.clip).cells[i]; if (c) return cellRegion(idx, i, c, j.metric, j.clip).latlng; }
+      return regionOf(idx, i, k, j.metric, j.clip).latlng;
+    };
     self.onmessage = (e) => { const m = e.data;
-      if (m.type === "data") { idx = makeIndex(m.lat, m.lng); gen = m.gen; jobs.clear(); return; }
+      if (m.type === "data") { idx = makeIndex(m.lat, m.lng); gen = m.gen; jobs.clear(); vc = null; vcKey = ""; return; }
       if (m.items.length) jobs.set(m.ch, Object.assign(m, { q: 0 })); else jobs.delete(m.ch);
       if (!running && jobs.size) { running = true; setTimeout(run, 0); }
     };
@@ -937,7 +955,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       for (const [ch, j] of jobs) { // one chunk per channel per round, then let new messages in
         if (j.gen !== gen) { jobs.delete(ch); continue; }
         const out = [], t = performance.now();
-        while (j.q < j.items.length && performance.now() - t < 30) { const [i, k] = j.items[j.q++]; out.push([i, k, regionOf(idx, i, k, j.metric, j.clip).latlng]); }
+        while (j.q < j.items.length && performance.now() - t < 30) { const [i, k] = j.items[j.q++]; out.push([i, k, region1(i, k, j)]); }
         self.postMessage({ ch, job: j.job, gen: j.gen, metric: j.metric, clip: j.clip, out });
         if (j.q >= j.items.length) jobs.delete(ch);
       }
@@ -947,9 +965,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const asyncCb = new Map(); // channel -> { job, onBatch }
   let worker = null, jobSeq = 0;
   try {
-    worker = new Worker(URL.createObjectURL(new Blob([$("core-src").textContent + "\n" + WORKER_SRC], { type: "text/javascript" })));
+    worker = new Worker(URL.createObjectURL(new Blob([$("dl-src").textContent + "\n" + $("core-src").textContent + "\n" + WORKER_SRC], { type: "text/javascript" })));
     worker.onmessage = (e) => {
       const m = e.data; if (m.gen !== st.gen) return;
+      if (m.type === "cells") { st.cellsInfo = Object.assign(m, { t: performance.now() }); return; } // the cells were (re)built: for the debug timing
       for (const [i, k, ll] of m.out) st.lcache.set(`${m.metric}|${m.clip}|${k}|${i}`, ll);
       const cb = asyncCb.get(m.ch); if (cb && cb.job === m.job) cb.onBatch(m.out);
     };
@@ -962,7 +981,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     for (const [i, k] of items) { const ll = cachedLL(i, k); if (ll) hit.push([i, k, ll]); else miss.push([i, k]); }
     asyncCb.set(ch, { job, onBatch });
     if (hit.length) onBatch(hit);
-    if (worker) { worker.postMessage({ ch, job, gen: st.gen, metric: st.metric, clip: st.clip, items: miss }); return; }
+    if (worker) { worker.postMessage({ ch, job, gen: st.gen, metric: st.metric, clip: st.clip, fast: $("fastVor").checked, items: miss }); return; }
     let q = 0;
     const step = () => {
       const cb = asyncCb.get(ch); if (!cb || cb.job !== job) return;
@@ -1425,6 +1444,17 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     drawDots();
   });
   $("followPause").addEventListener("change", () => { try { localStorage.setItem("followPause", $("followPause").value); } catch (e) {} });
+  // all order-1 regions at once (Delaunay) or one by one: drop the cached order-1 regions so the switch recomputes,
+  // and time the next drawing of the adjacent-station lines (temporary debug toast)
+  $("fastVor").addEventListener("change", () => {
+    const on = $("fastVor").checked;
+    try { localStorage.setItem("fastVor", on ? "1" : "0"); } catch (e) {}
+    for (const c of [st.lcache, st.cache]) for (const key of [...c.keys()]) if (key.split("|")[2] === "1") c.delete(key);
+    debugCtl.update();
+    if ($("vor1").checked && map.getZoom() >= +$("bndZoom").value) { st.vorTiming = true; drawVor(); }
+    else toast(`位置登録の範囲：${on ? "まとめて計算" : "従来の計算"}（隣接駅間の境界線を表示していないので、時間は測っていません）`);
+    drawUaAreas();
+  });
   $("realDist").addEventListener("change", () => {
     try { localStorage.setItem("realDist", $("realDist").checked ? "1" : "0"); } catch (e) {}
     if (track.pos) evaluate(false);
@@ -1601,6 +1631,22 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     }
   };
   viewCtl.addTo(map); clearCtl.addTo(map); radarCtl.addTo(map);
+  // (temporary, debug; user) switch how the order-1 regions are computed from the map, to compare the two
+  const debugCtl = L.control({ position: "topright" });
+  debugCtl.onAdd = () => {
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl debug-ctl");
+    debugCtl.btn = ctlBtn(box, "Δ", () => { $("fastVor").checked = !$("fastVor").checked; $("fastVor").dispatchEvent(new Event("change")); });
+    L.DomEvent.disableClickPropagation(box);
+    setTimeout(() => debugCtl.update(), 0);
+    return box;
+  };
+  debugCtl.update = () => {
+    const b = debugCtl.btn; if (!b) return;
+    const on = $("fastVor").checked;
+    b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
+    b.title = `（仮・デバッグ）位置登録の範囲：${on ? "まとめて計算" : "従来の計算"}`; b.setAttribute("aria-label", b.title);
+  };
+  debugCtl.addTo(map);
   const grpClearable = () => $("grpMode").checked && grp.ids.length > 0;
   // clear the group (multi-station mode), undoable for UNDO_MS. The selection is left alone: it is not shown in the mode
   function clearGroupAll() {
@@ -1857,8 +1903,13 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("vor"); if ($("vorNames").checked) updateLabels(); return; }
     st.vorDrawn = { zoom: map.getZoom(), bounds: map.getBounds().pad(0.2) };
     const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
+    const timing = st.vorTiming ? { t0: performance.now(), got: 0 } : null; st.vorTiming = false;
     regionsAsync("vor", todo.map(i => [i, 1]), (out) => {
       if (job !== st.vorJob) return;
+      if (timing && (timing.got += out.length) >= todo.length) { // (temporary) debug: how long the whole drawing took
+        const ci = st.cellsInfo && st.cellsInfo.t >= timing.t0 ? `・うち全駅の三角形分割 ${st.cellsInfo.ms.toFixed(0)} ms（${st.cellsInfo.used}/${st.cellsInfo.n} 駅）` : "";
+        toast(`隣接駅間の境界線 ${todo.length} 駅：${(performance.now() - timing.t0).toFixed(0)} ms（${$("fastVor").checked ? "まとめて計算" : "従来の計算"}${ci}）`);
+      }
       L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
       for (const o of out) st.vorPolys.push([o[0], o[2]]);
       if ($("vorNames").checked && !vorNameRaf) vorNameRaf = requestAnimationFrame(() => { vorNameRaf = 0; updateLabels(); });
@@ -2063,7 +2114,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   // right column, top to bottom: layers, zoom, location, view (the big layer button at the top, not in the middle)
   function arrangeControls() {
-    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl, clearCtl, radarCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
+    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl, clearCtl, radarCtl, debugCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
   }
   try { const cm = localStorage.getItem("compactMode"); if (["auto", "on", "off"].includes(cm)) $("compactMode").value = cm; } catch (e) {}
   $("compactMode").addEventListener("change", () => { try { localStorage.setItem("compactMode", $("compactMode").value); } catch (e) {} applyCompact(); });
@@ -2400,6 +2451,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const bz = localStorage.getItem("bndZoom"); if (bz !== null && [...$("bndZoom").options].some(o => o.value === bz)) $("bndZoom").value = bz;
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
     $("realDist").checked = localStorage.getItem("realDist") !== "0";
+    $("fastVor").checked = localStorage.getItem("fastVor") !== "0";
     $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
     const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
