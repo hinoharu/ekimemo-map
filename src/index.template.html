@@ -301,8 +301,9 @@ details.sub[open] > summary { margin-bottom: 4px; }
 /* location buttons on the map (Leaflet control, under the zoom buttons) */
 .geo-ctl a { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; line-height: 0; color: var(--ink); cursor: pointer; }
 .geo-ctl a svg { width: 20px; height: 20px; }
-.geo-ctl a.on { background: var(--region); color: #fff; }
-.geo-ctl a.on:hover { background: #174b86; }
+/* "on" in the color it stands for (--on: set by the button from the color settings, e.g. the group's purple; user) */
+.geo-ctl a.on { background: var(--on, var(--region)); color: #fff; }
+.geo-ctl a.on:hover { background: var(--on, var(--region)); filter: brightness(0.88); }
 .geo-ctl a.armed { color: var(--region); }
 .geo-ctl a[hidden] { display: none; }
 /* the radar buttons */
@@ -758,7 +759,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // ---------------- colors (user-settable; localStorage "colors"). The rank tiers are shared by the rank numbers, the
   // nearest-station box's list and the selected station's area / three-fold view, so their meaning stays aligned
   const COLOR_DEFAULT = { t0: "#1f5fa8", t1: "#0f8f7e", t2: "#d97706", grp: "#7c3aed", stn: "#c2410c", closed: "#9aa0ad", ua: "#d1267a", uaClosed: "#8e44ad" };
-  const COLOR_KINDS = [["t0", "順位・選択駅のエリア"], ["t1", "三重表示の中間"], ["t2", "三重表示の外側"], ["grp", "複数選択"],
+  const COLOR_KINDS = [["t0", "選択駅のエリア・順位の番号"], ["t1", "ブースター使用時のエリア"], ["t2", "なつめスキル使用時のエリア"], ["grp", "複数選択"],
     ["stn", "駅"], ["closed", "廃駅"], ["ua", "未取得駅"], ["uaClosed", "未取得の廃駅"]];
   const C = { ...COLOR_DEFAULT };
   try { const o = JSON.parse(localStorage.getItem("colors") || "null"); if (o) for (const k in COLOR_DEFAULT) if (/^#[0-9a-f]{6}$/i.test(o[k] || "")) C[k] = o[k]; } catch (e) {}
@@ -1511,6 +1512,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     viewCtl.triple.classList.toggle("on", t); viewCtl.triple.setAttribute("aria-pressed", String(t));
     viewCtl.triple.title = `選択駅の登録可能エリアを使う手段ごとに塗り分け：${t ? "オン" : "オフ"}`;
     viewCtl.multi.classList.toggle("on", on); viewCtl.multi.setAttribute("aria-pressed", String(on));
+    // each in the color it stands for (follows the color settings): the group's, the selected area's / the numbers'
+    viewCtl.multi.style.setProperty("--on", C.grp); viewCtl.marks.style.setProperty("--on", C.t0); viewCtl.triple.style.setProperty("--on", C.t0);
     viewCtl.multi.title = `複数選択モード：${on ? "オン（駅のタップでグループに追加・削除）" : "オフ"}${grp.ids.length ? `・${grp.ids.length} 駅` : ""}`;
     if (viewCtl.clear) {
       // in the multi-station mode it clears the whole group; otherwise the selected station
@@ -2277,6 +2280,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     document.documentElement.style.setProperty("--ua", C.ua); document.documentElement.style.setProperty("--ua-closed", C.uaClosed);
     drawStations(); updateLabels(); drawUaAreas(); if (st.rows.length) redraw(false);
     if (track.pos) evaluate(false);
+    viewCtl.update(); radarUi(); // the buttons' "on" colors
   }
   const saveColors = () => { try { localStorage.setItem("colors", JSON.stringify(C)); } catch (e) {} };
   $("colorBox").addEventListener("input", (e) => { const k = e.target.dataset.c; if (!k) return; C[k] = e.target.value; saveColors(); applyColors(); });
