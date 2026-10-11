@@ -258,6 +258,13 @@ function regionOf(idx, s, k, metric, clipDeg = 3) {
     for (const r of add) { used.push(r); inUse.add(r[1]); }
   }
   const m = used.length;
+  // The walk starts where the k-th line crosses the +x ray: a point inside an edge, not a vertex
+  // (it showed up as one extra vertex). Drop it when it is collinear with its neighbours.
+  if (poly.length > 3) {
+    const n = poly.length, [x0, y0] = poly[0], [xa, ya] = poly[n - 1], [xb, yb] = poly[1];
+    const cr = (xa - x0) * (yb - y0) - (ya - y0) * (xb - x0);
+    if (Math.abs(cr) <= 1e-9 * Math.hypot(xa - x0, ya - y0) * Math.hypot(xb - x0, yb - y0)) poly = poly.slice(1);
+  }
   // densify edges (straight in the local plane) and map back to lat/lng
   const out = [];
   for (let q = 0; q < poly.length; q++) {
