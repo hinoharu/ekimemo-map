@@ -1562,7 +1562,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const R = st.radar;
     for (const b of radarCtl.btns) {
       const dots = R.radar ? (R.booster ? `<i style="background:${TIER[1]}"></i>` : "") + (R.natsume ? `<i style="background:${TIER[2]}"></i>` : "") : "";
-      b.count.innerHTML = `<b>${R.base}</b>${dots ? `<span class="dots">${dots}</span>` : ""}`;
+      // the dots only on the lone count button (compact, closed): next to the six the means buttons show it
+      b.count.innerHTML = `<b>${R.base}</b>${dots && !b.plus ? `<span class="dots">${dots}</span>` : ""}`;
       b.count.classList.toggle("off", !R.radar);
       b.count.title = !R.radar ? "レーダーを使わない（位置登録のみ）" : `素の検知駅数 ${R.base}・最大 ${st.k} 駅`;
       if (!b.radar) continue;
