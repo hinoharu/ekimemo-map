@@ -302,6 +302,7 @@ details.sub[open] > summary { margin-bottom: 4px; }
 /* location buttons on the map (Leaflet control, under the zoom buttons) */
 .geo-ctl a { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; line-height: 0; color: var(--ink); cursor: pointer; }
 .geo-ctl a svg { width: 20px; height: 20px; }
+.debug-ctl a { font: 700 16px/1 var(--font-body); } /* (temporary) debug switch, "Δ" */
 /* "on" in the color it stands for (--on: set by the button from the color settings, e.g. the group's purple; user) */
 .geo-ctl a.on { background: var(--on, var(--region)); color: #fff; }
 @media (hover: hover) { .geo-ctl a.on:hover { background: var(--on, var(--region)); filter: brightness(0.88); } }
@@ -392,7 +393,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
     </div>
     <label class="check"><input type="checkbox" id="nearOn"> 最寄り駅名を常に表示</label>
-    <label class="check"><input type="checkbox" id="hideClosed"> 廃駅を隠す</label>
+    <label class="check"><input type="checkbox" id="closedDist" checked> 廃駅を区別して表示する</label>
+    <div class="note">駅データで廃止になっている駅の点と駅名を灰色で描きます。駅メモでは廃駅も現役の駅と同じに扱われるので、計算には常に含めます。</div>
     <label class="check"><input type="checkbox" id="uaHi" checked> 未取得駅を強調表示</label>
     <label class="check sub-check" data-dep="uaHi"><input type="checkbox" id="uaFill"> 未取得駅を取れる範囲を表示</label>
     <label class="check"><input type="checkbox" id="triple"> 選択駅の登録可能エリアを、使う手段ごとに塗り分ける</label>
@@ -553,6 +555,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
     </div>
     <label class="check"><input type="checkbox" id="realDist" checked> 駅の距離は測り方によらず実距離で表示する</label>
     <div class="note">最寄り駅の表示と一覧の距離。オフにすると上の測り方で測った距離（緯度 1° を約 111.2 km として換算）を出し、距離の並びが順位と一致します。</div>
+    <label class="check"><input type="checkbox" id="fastVor" checked> 位置登録の範囲をまとめて計算する（高速）</label>
+    <div class="note">隣接駅間の境界線と未取得駅の位置登録の範囲を、全駅のドロネー三角形分割からまとめて求めます。結果は従来の計算と同じです（距離の測り方が球面のときと、外周や計算範囲の枠にかかる駅は従来の計算）。</div>
     <div class="field">
       <div class="label">計算範囲（駅からの四角い窓）</div>
       <select id="clip" aria-label="計算範囲">
@@ -586,6 +590,9 @@ details.sub[open] > summary { margin-bottom: 4px; }
 <button id="menuFab" class="menu-fab" aria-expanded="true" aria-label="メニューをたたむ"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script id="dl-src">
+/*DELAUNATOR*/
+</script>
 <script id="core-src">
 /*CORE*/
 </script>
@@ -743,13 +750,16 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // ---------------- data
   function loadRows(rows, version) {
     st.all = rows; st.version = version;
-    applyFilter(false);
+    setStationSet(false);
   }
-  function applyFilter(keepSel) {
+  // the only place that changes the station set (loading the data, 駅データ更新). Closed stations are always in it:
+  // the game treats them like any other station (the user); they are only drawn differently (closedShown)
+  function setStationSet(keepSel) {
     const prevId = st.sel >= 0 ? st.rows[st.sel][0] : null;
-    st.rows = !$("hideClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
+    st.rows = st.all;
     const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
     st.idx = makeIndex(lat, lng);
+    // a new station set: a new generation (part of every region cache key, see regionEnv)
     st.cache.clear(); st.lcache.clear(); st.gen++;
     if (worker) worker.postMessage({ type: "data", gen: st.gen, lat, lng });
     drawStations();
@@ -774,6 +784,9 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const paleOf = (c, def, pale) => c.toLowerCase() === def ? pale : "#" + [1, 3, 5].map(j => Math.round(parseInt(c.slice(j, j + 2), 16) * 0.45 + 255 * 0.55).toString(16).padStart(2, "0")).join("");
   const stnPale = () => paleOf(C.stn, COLOR_DEFAULT.stn, "#eaa98b"), closedPale = () => paleOf(C.closed, COLOR_DEFAULT.closed, "#c8ccd4");
   const isUa = (i) => st.ua.has(st.rows[i][2]);
+  // closed stations drawn differently (grey dots and names; unacquired: their own color) only while "closedDist" is on.
+  // The text marks (（廃駅）, 廃止, （廃）) always stay: plain information
+  const closedShown = (r) => r[6] && $("closedDist").checked;
   // the selected station as drawn: none in the multi-station mode (it means nothing there and its ring covered the
   // group's purple one; its area, three-fold lines and contour lines are hidden too). Kept, and back on leaving the mode
   const shownSel = () => $("grpMode").checked ? -1 : st.sel;
@@ -785,7 +798,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       radius: sel ? 7 : ua ? 4.5 : 3, weight: ua ? 1.5 : 1,
       // with a list loaded, acquired stations recede: a pale solid color (not a translucent fill, which blurred the dots
       // and let the white rims of crowded dots read as rings)
-      fillColor: ua ? (r[6] ? C.uaClosed : C.ua) : hi && !sel ? (r[6] ? closedPale() : stnPale()) : (r[6] ? C.closed : C.stn),
+      fillColor: ua ? (closedShown(r) ? C.uaClosed : C.ua) : hi && !sel ? (closedShown(r) ? closedPale() : stnPale()) : (closedShown(r) ? C.closed : C.stn),
       fillOpacity: 0.95,
     };
   }
@@ -914,8 +927,16 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const lvOpacity = (f) => 1 - (2 / 3) * f; // f = j / k
 
   // ---------------- region computation (cached)
+  // Everything a region depends on besides the station and k: the station set (st.gen, advanced by setStationSet, the
+  // only place that changes the set), the metric and the clip window. Every cache of regions is keyed by all of them
+  // and the worker gets them with each job (its Delaunay cells are keyed by them too), so a change of any of them can
+  // never reuse an old result even if a cache is not cleared. A new input that changes regions goes into
+  // regionEnv (and the worker's cellsFor key), nowhere else. (The fast / one-by-one switch does not change results.)
+  const regionEnv = () => ({ gen: st.gen, metric: st.metric, clip: st.clip });
+  const regionKey = (e, k, i) => `${e.gen}|${e.metric}|${e.clip}|${k}|${i}`;
+  const keyK = (key) => key.split("|")[3]; // k of a regionKey
   function region(i, k) {
-    const key = `${st.metric}|${st.clip}|${k}|${i}`;
+    const key = regionKey(regionEnv(), k, i);
     let R = st.cache.get(key);
     if (!R) { R = regionOf(st.idx, i, k, st.metric, st.clip); st.cache.set(key, R); }
     return R;
@@ -927,9 +948,23 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // (~30 ms of work each) and are cached here (st.lcache: latlng only). A newer job on the same channel
   // replaces the older one in the worker. Without Worker support the same jobs run here in small slices.
   const WORKER_SRC = `
-    let idx = null, gen = -1, running = false; const jobs = new Map();
+    let idx = null, gen = -1, running = false, vc = null, vcKey = ""; const jobs = new Map();
+    // all order-1 regions at once (voronoiCells), built on first use for the station set (gen), metric and clip:
+    // the same inputs as regionEnv in the page; null cells: regionOf
+    const cellsFor = (metric, clip) => {
+      const key = gen + "|" + metric + "|" + clip;
+      if (vcKey !== key) {
+        vc = voronoiCells(Delaunator, idx, metric, clip); vcKey = key;
+        self.postMessage({ type: "cells", gen, metric, clip, used: vc.used, n: idx.n, ms: vc.ms });
+      }
+      return vc;
+    };
+    const region1 = (i, k, j) => {
+      if (k === 1 && j.fast && (j.metric === "flat" || j.metric === "cos")) { const c = cellsFor(j.metric, j.clip).cells[i]; if (c) return cellRegion(idx, i, c, j.metric, j.clip).latlng; }
+      return regionOf(idx, i, k, j.metric, j.clip).latlng;
+    };
     self.onmessage = (e) => { const m = e.data;
-      if (m.type === "data") { idx = makeIndex(m.lat, m.lng); gen = m.gen; jobs.clear(); return; }
+      if (m.type === "data") { idx = makeIndex(m.lat, m.lng); gen = m.gen; jobs.clear(); vc = null; vcKey = ""; return; }
       if (m.items.length) jobs.set(m.ch, Object.assign(m, { q: 0 })); else jobs.delete(m.ch);
       if (!running && jobs.size) { running = true; setTimeout(run, 0); }
     };
@@ -937,7 +972,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       for (const [ch, j] of jobs) { // one chunk per channel per round, then let new messages in
         if (j.gen !== gen) { jobs.delete(ch); continue; }
         const out = [], t = performance.now();
-        while (j.q < j.items.length && performance.now() - t < 30) { const [i, k] = j.items[j.q++]; out.push([i, k, regionOf(idx, i, k, j.metric, j.clip).latlng]); }
+        while (j.q < j.items.length && performance.now() - t < 30) { const [i, k] = j.items[j.q++]; out.push([i, k, region1(i, k, j)]); }
         self.postMessage({ ch, job: j.job, gen: j.gen, metric: j.metric, clip: j.clip, out });
         if (j.q >= j.items.length) jobs.delete(ch);
       }
@@ -947,22 +982,23 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const asyncCb = new Map(); // channel -> { job, onBatch }
   let worker = null, jobSeq = 0;
   try {
-    worker = new Worker(URL.createObjectURL(new Blob([$("core-src").textContent + "\n" + WORKER_SRC], { type: "text/javascript" })));
+    worker = new Worker(URL.createObjectURL(new Blob([$("dl-src").textContent + "\n" + $("core-src").textContent + "\n" + WORKER_SRC], { type: "text/javascript" })));
     worker.onmessage = (e) => {
       const m = e.data; if (m.gen !== st.gen) return;
-      for (const [i, k, ll] of m.out) st.lcache.set(`${m.metric}|${m.clip}|${k}|${i}`, ll);
+      if (m.type === "cells") { st.cellsInfo = Object.assign(m, { t: performance.now() }); return; } // the cells were (re)built: for the debug timing
+      for (const [i, k, ll] of m.out) st.lcache.set(regionKey(m, k, i), ll); // m: the job's gen, metric, clip
       const cb = asyncCb.get(m.ch); if (cb && cb.job === m.job) cb.onBatch(m.out);
     };
     worker.onerror = () => { worker = null; };
   } catch (e) { worker = null; }
-  const cachedLL = (i, k) => { const key = `${st.metric}|${st.clip}|${k}|${i}`, R = st.cache.get(key); return R ? R.latlng : st.lcache.get(key); };
+  const cachedLL = (i, k) => { const key = regionKey(regionEnv(), k, i), R = st.cache.get(key); return R ? R.latlng : st.lcache.get(key); };
   // regions for items [[i, k], ...]: cached ones at once, the rest as they are computed; onBatch([[i, k, latlng], ...])
   function regionsAsync(ch, items, onBatch) {
     const job = ++jobSeq, hit = [], miss = [];
     for (const [i, k] of items) { const ll = cachedLL(i, k); if (ll) hit.push([i, k, ll]); else miss.push([i, k]); }
     asyncCb.set(ch, { job, onBatch });
     if (hit.length) onBatch(hit);
-    if (worker) { worker.postMessage({ ch, job, gen: st.gen, metric: st.metric, clip: st.clip, items: miss }); return; }
+    if (worker) { worker.postMessage({ ch, job, ...regionEnv(), fast: $("fastVor").checked, items: miss }); return; }
     let q = 0;
     const step = () => {
       const cb = asyncCb.get(ch); if (!cb || cb.job !== job) return;
@@ -1119,8 +1155,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
         ctx.strokeText(r[2], x, y); ctx.fillStyle = color(r); ctx.fillText(r[2], x, y);
       }
     };
-    draw(all, 12, 6, (r) => r[6] ? "#687089" : "#1d2433");
-    draw(ua, 12, 7, (r) => r[6] ? C.uaClosed : C.ua);
+    draw(all, 12, 6, (r) => closedShown(r) ? "#687089" : "#1d2433");
+    draw(ua, 12, 7, (r) => closedShown(r) ? C.uaClosed : C.ua);
     draw(grpIdx(), 13, 11, () => C.grp);
     if (shownSel() >= 0 && st.rows[shownSel()]) draw([shownSel()], 14, 13, () => C.stn);
     if ($("vorNames").checked) drawVorNames(ctx);
@@ -1425,6 +1461,17 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     drawDots();
   });
   $("followPause").addEventListener("change", () => { try { localStorage.setItem("followPause", $("followPause").value); } catch (e) {} });
+  // all order-1 regions at once (Delaunay) or one by one: drop the cached order-1 regions so the switch recomputes,
+  // and time the next drawing of the adjacent-station lines (temporary debug toast)
+  $("fastVor").addEventListener("change", () => {
+    const on = $("fastVor").checked;
+    try { localStorage.setItem("fastVor", on ? "1" : "0"); } catch (e) {}
+    for (const c of [st.lcache, st.cache]) for (const key of [...c.keys()]) if (keyK(key) === "1") c.delete(key);
+    debugCtl.update();
+    if ($("vor1").checked && map.getZoom() >= +$("bndZoom").value) { st.vorTiming = true; drawVor(); }
+    else toast(`位置登録の範囲：${on ? "まとめて計算" : "従来の計算"}（隣接駅間の境界線を表示していないので、時間は測っていません）`);
+    drawUaAreas();
+  });
   $("realDist").addEventListener("change", () => {
     try { localStorage.setItem("realDist", $("realDist").checked ? "1" : "0"); } catch (e) {}
     if (track.pos) evaluate(false);
@@ -1601,6 +1648,22 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     }
   };
   viewCtl.addTo(map); clearCtl.addTo(map); radarCtl.addTo(map);
+  // (temporary, debug; user) switch how the order-1 regions are computed from the map, to compare the two
+  const debugCtl = L.control({ position: "topright" });
+  debugCtl.onAdd = () => {
+    const box = L.DomUtil.create("div", "leaflet-bar geo-ctl debug-ctl");
+    debugCtl.btn = ctlBtn(box, "Δ", () => { $("fastVor").checked = !$("fastVor").checked; $("fastVor").dispatchEvent(new Event("change")); });
+    L.DomEvent.disableClickPropagation(box);
+    setTimeout(() => debugCtl.update(), 0);
+    return box;
+  };
+  debugCtl.update = () => {
+    const b = debugCtl.btn; if (!b) return;
+    const on = $("fastVor").checked;
+    b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
+    b.title = `（仮・デバッグ）位置登録の範囲：${on ? "まとめて計算" : "従来の計算"}`; b.setAttribute("aria-label", b.title);
+  };
+  debugCtl.addTo(map);
   const grpClearable = () => $("grpMode").checked && grp.ids.length > 0;
   // clear the group (multi-station mode), undoable for UNDO_MS. The selection is left alone: it is not shown in the mode
   function clearGroupAll() {
@@ -1857,8 +1920,13 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (!$("vor1").checked || map.getZoom() < +$("bndZoom").value) { cancelAsync("vor"); if ($("vorNames").checked) updateLabels(); return; }
     st.vorDrawn = { zoom: map.getZoom(), bounds: map.getBounds().pad(0.2) };
     const todo = stationsForView(1, 0.2).slice(0, 3000); // zoomed far out: only around the center
+    const timing = st.vorTiming ? { t0: performance.now(), got: 0 } : null; st.vorTiming = false;
     regionsAsync("vor", todo.map(i => [i, 1]), (out) => {
       if (job !== st.vorJob) return;
+      if (timing && (timing.got += out.length) >= todo.length) { // (temporary) debug: how long the whole drawing took
+        const ci = st.cellsInfo && st.cellsInfo.t >= timing.t0 ? `・うち全駅の三角形分割 ${st.cellsInfo.ms.toFixed(0)} ms（${st.cellsInfo.used}/${st.cellsInfo.n} 駅）` : "";
+        toast(`隣接駅間の境界線 ${todo.length} 駅：${(performance.now() - timing.t0).toFixed(0)} ms（${$("fastVor").checked ? "まとめて計算" : "従来の計算"}${ci}）`);
+      }
       L.polygon(out.map(o => o[2]), { renderer: lineR, ...lineStyle("vor"), fill: false, interactive: false }).addTo(vorLayer);
       for (const o of out) st.vorPolys.push([o[0], o[2]]);
       if ($("vorNames").checked && !vorNameRaf) vorNameRaf = requestAnimationFrame(() => { vorNameRaf = 0; updateLabels(); });
@@ -2006,7 +2074,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   });
   $("levels").addEventListener("change", () => { st.levelJob++; redraw(false); });
   $("viewAll").addEventListener("change", () => { if ($("viewAll").checked) drawView(); else { st.viewJob++; cancelAsync("view"); viewLayer.clearLayers(); } });
-  $("hideClosed").addEventListener("change", () => applyFilter(true));
+  $("closedDist").addEventListener("change", () => {
+    try { localStorage.setItem("closedDist", $("closedDist").checked ? "1" : "0"); } catch (e) {}
+    drawStations(); updateLabels(); renderUaList();
+  });
   function setFolded(c) {
     $("panel").classList.toggle("collapsed", c); document.body.classList.toggle("folded", c); syncBars();
     $("fold").querySelector(".fold-txt").textContent = c ? "ひらく" : "たたむ";
@@ -2063,7 +2134,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   }
   // right column, top to bottom: layers, zoom, location, view (the big layer button at the top, not in the middle)
   function arrangeControls() {
-    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl, clearCtl, radarCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
+    for (const c of [layersCtl, zoomCtl, geoCtl, viewCtl, clearCtl, radarCtl, debugCtl]) { const el = c.getContainer(); if (el && el.parentNode) el.parentNode.appendChild(el); }
   }
   try { const cm = localStorage.getItem("compactMode"); if (["auto", "on", "off"].includes(cm)) $("compactMode").value = cm; } catch (e) {}
   $("compactMode").addEventListener("change", () => { try { localStorage.setItem("compactMode", $("compactMode").value); } catch (e) {} applyCompact(); });
@@ -2185,7 +2256,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     } else ids.sort((a, b) => st.rows[a][7] - st.rows[b][7] || st.rows[a][3].localeCompare(st.rows[b][3], "ja"));
     $("uaList").innerHTML = ids.map(i => {
       const r = st.rows[i], sub = from ? fmtKm(st.uaDist.get(i)) : (PREF[r[7]] || "");
-      return `<li><button type="button" data-i="${i}"><span class="${r[6] ? "c" : ""}">${esc(r[2])}</span><span class="d">${sub}</span></button></li>`;
+      return `<li><button type="button" data-i="${i}"><span class="${closedShown(r) ? "c" : ""}">${esc(r[2])}</span><span class="d">${sub}</span></button></li>`;
     }).join("");
     $("uaList").title = from ? `${from}からの距離` : "";
   }
@@ -2237,7 +2308,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     st.ua = next; saveUa();
     $("uaInfo").textContent = `${f.name} から未取得 ${next.size} 駅を読み込みました。` +
       (unknown.length ? `駅データにない駅名（${unknown.length}）：${unknown.slice(0, 20).join("・")}${unknown.length > 20 ? " ほか" : ""}` : "すべての駅名が駅データと一致しました。");
-    applyFilter(true); // closed unacquired stations must be present even when closed ones are hidden
+    redraw(false); uaChanged(false); // redraw: the dots and the unacquired areas
   });
   $("uaExport").addEventListener("click", () => {
     if (!st.ua.size) { toast("未取得駅がありません。"); return; }
@@ -2252,7 +2323,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   $("uaClear").addEventListener("click", () => {
     if (!st.ua.size || !confirm(`未取得駅（${st.ua.size} 駅）をすべて消しますか？（先に「CSV に書き出す」で保存できます）`)) return;
     st.ua = new Map(); saveUa(); $("uaInfo").textContent = "";
-    applyFilter(true);
+    redraw(false); uaChanged(false);
   });
 
   // ---------------- line style editor
@@ -2400,6 +2471,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const bz = localStorage.getItem("bndZoom"); if (bz !== null && [...$("bndZoom").options].some(o => o.value === bz)) $("bndZoom").value = bz;
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
     $("realDist").checked = localStorage.getItem("realDist") !== "0";
+    $("closedDist").checked = localStorage.getItem("closedDist") !== "0";
+    $("fastVor").checked = localStorage.getItem("fastVor") !== "0";
     $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
     const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
