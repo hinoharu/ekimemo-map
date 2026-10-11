@@ -64,6 +64,8 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
 #nearBox.open .k::after { content: " ▴"; }
 #nearBox .nbx { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.2s ease; }
 #nearBox.open .nbx { grid-template-rows: 1fr; }
+/* while the floating radar buttons are open, fold the list back (it would cover them); the saved state stays */
+body.rpop #nearBox.open { z-index: 900; } body.rpop #nearBox.open .nbx { grid-template-rows: 0fr; } body.rpop #nearBox.open .k::after { content: " ▾"; }
 #nearBox .nbx > div { overflow: hidden; min-height: 0; }
 #nearBox ol { margin: 4px 0 1px; padding: 4px 0 0; list-style: none; border-top: 1px solid rgba(255, 255, 255, 0.25);
   max-height: 50vh; overflow: auto; overscroll-behavior: contain; display: grid; gap: 1px; }
@@ -143,7 +145,7 @@ body.compact #grpBar, body.compact #selBar { left: 46px; max-width: calc(100% - 
 @media (max-width: 640px) {
   body.compact .leaflet-control-layers { display: none; }
   body.compact .leaflet-top.leaflet-left .leaflet-control-zoom { margin-top: 40px; margin-left: 6px; }
-  body.compact .leaflet-top.leaflet-left .view-ctl, body.compact .leaflet-top.leaflet-left .multi-ctl { margin-top: 6px; margin-left: 6px; }
+  body.compact .leaflet-top.leaflet-left .view-ctl, body.compact .leaflet-top.leaflet-left .clear-ctl { margin-top: 6px; margin-left: 6px; }
   body.compact .leaflet-top.leaflet-right .leaflet-control { margin-top: 6px; margin-right: 6px; }
   body.compact .geo-ctl a { width: 30px; height: 30px; }
   body.compact .geo-ctl a svg { width: 17px; height: 17px; }
@@ -1535,7 +1537,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       b.count.classList.add("cnt"); if (b.close) b.close.classList.add("pm", "x");
       return b;
     };
-    radarCtl.btns = [];
+    radarCtl.btns = []; radarCtl.pop = null; document.body.classList.remove("rpop");
     if (!compact) radarCtl.btns.push(six(box, false));
     else {
       const cnt = ctlBtn(box, "", () => radarCtl.toggle()); cnt.classList.add("cnt");
@@ -1551,6 +1553,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     if (!radarCtl.pop) return;
     radarCtl.pop.hidden = open === undefined ? !radarCtl.pop.hidden : !open;
     radarCtl.box.classList.toggle("open", !radarCtl.pop.hidden);
+    document.body.classList.toggle("rpop", !radarCtl.pop.hidden);
   };
   // a tap anywhere else closes the floating six
   document.addEventListener("pointerdown", (e) => { if (radarCtl.pop && !radarCtl.pop.hidden && !radarCtl.box.contains(e.target)) radarCtl.toggle(false); }, true);
