@@ -540,6 +540,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
       <div class="note">平面：緯度・経度をそのまま平面とみなす（既定）。cos 36°：経度を cos 36° で縮める。球面：大圏距離。</div>
     </div>
+    <label class="check"><input type="checkbox" id="realDist" checked> 駅の距離を実距離で表示する</label>
+    <div class="note">最寄り駅の表示と一覧の距離。オフにすると上の測り方で測った距離（緯度 1° を約 111.2 km として換算）を出し、距離の並びが順位と一致します。</div>
     <div class="field">
       <div class="label">計算範囲（駅からの四角い窓）</div>
       <select id="clip" aria-label="計算範囲">
@@ -1412,6 +1414,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     drawDots();
   });
   $("followPause").addEventListener("change", () => { try { localStorage.setItem("followPause", $("followPause").value); } catch (e) {} });
+  $("realDist").addEventListener("change", () => {
+    try { localStorage.setItem("realDist", $("realDist").checked ? "1" : "0"); } catch (e) {}
+    if (track.pos) evaluate(false);
+  });
   $("autoZoom").addEventListener("change", () => { try { localStorage.setItem("autoZoom", $("autoZoom").checked ? "1" : "0"); } catch (e) {} });
   $("geoRate").addEventListener("change", () => {
     try { localStorage.setItem("geoRate", $("geoRate").value); } catch (e) {}
@@ -1857,7 +1863,14 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     return 2 * R * Math.asin(Math.sqrt(h));
   }
   const fmtKm = (d) => d < 10 ? d.toFixed(2) + " km" : d.toFixed(1) + " km";
-  const km = (a1, o1, a2, o2) => fmtKm(kmOf(a1, o1, a2, o2));
+  // the distance in the chosen metric, in km (1° of latitude ≈ 111.2 km), so the order matches the ranks; sphere = real
+  function metricKm(a1, o1, a2, o2) {
+    if (st.metric === "sphere") return kmOf(a1, o1, a2, o2);
+    const k = st.metric === "cos" ? Math.cos(36 * DEG) : 1;
+    return Math.hypot(a2 - a1, (o2 - o1) * k) * 6371.0088 * DEG;
+  }
+  // the nearest-station box: real distance unless the user turned "realDist" off (then the metric's)
+  const km = (a1, o1, a2, o2) => fmtKm(($("realDist").checked ? kmOf : metricKm)(a1, o1, a2, o2));
   function sphericalArea(ll) { // km², via local equal-area approximation per polygon (fine at this scale)
     const R = 6371.0088; let s = 0;
     for (let i = 0; i < ll.length; i++) {
@@ -2368,6 +2381,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const ro = JSON.parse(localStorage.getItem("radarOpts") || "{}"); for (const id of RADAR_OPTS) if (typeof ro[id] === "boolean") $(id).checked = ro[id];
     const bz = localStorage.getItem("bndZoom"); if (bz !== null && [...$("bndZoom").options].some(o => o.value === bz)) $("bndZoom").value = bz;
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
+    $("realDist").checked = localStorage.getItem("realDist") !== "0";
     $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
     const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
