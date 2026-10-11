@@ -540,6 +540,8 @@ details.sub[open] > summary { margin-bottom: 4px; }
       </select>
       <div class="note">平面：緯度・経度をそのまま平面とみなす（既定）。cos 36°：経度を cos 36° で縮める。球面：大圏距離。</div>
     </div>
+    <label class="check"><input type="checkbox" id="realDist" checked> 駅の距離を実距離で表示する</label>
+    <div class="note">最寄り駅の表示と一覧の距離。オフにすると上の測り方で測った距離（緯度 1° を約 111.2 km として換算）を出し、距離の並びが順位と一致します。</div>
     <div class="field">
       <div class="label">計算範囲（駅からの四角い窓）</div>
       <select id="clip" aria-label="計算範囲">
@@ -987,7 +989,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const RADAR_DEF = { base: 12, radar: true, booster: true, natsume: true };
   st.radar = { ...RADAR_DEF };
   try { const o = JSON.parse(localStorage.getItem("radarCfg") || "null"); if (o) for (const key in RADAR_DEF) if (typeof o[key] === typeof RADAR_DEF[key]) st.radar[key] = o[key]; } catch (e) {}
-  const MEANS_TIER = { base: 0, booster: 1, natsume: 2 }, MEANS_DASH = { base: "1.5 4", booster: "7 5" };
+  const MEANS_TIER = { base: 0, booster: 1, natsume: 2 }, INNER_DASH = "1.5 4"; // the inner tiers all dotted: the colors tell them apart (user)
   function radarTiers() {
     const R = st.radar;
     if (!R.radar) return [{ k: 1, m: "base" }];
@@ -1029,13 +1031,13 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     }
     const poly = L.polygon(R.latlng, { renderer: lineR, ...lineStyle("sel"), color: outC, fill: !multi, fillColor: TIER[0], fillOpacity: 0.16, interactive: false });
     poly.lineColor = outC; poly.addTo(regionLayer);
-    // the inner tiers' lines: dotted (base) / dashed (+booster), each in the color of what it encloses
+    // the inner tiers' lines: dotted, each in the color of what it encloses
     const extra = [];
     if (multi) for (const t of tiers.slice(0, -1)) {
-      const Rk = region(st.sel, t.k), lc = TIER[MEANS_TIER[t.m]], dash = MEANS_DASH[t.m];
+      const Rk = region(st.sel, t.k), lc = TIER[MEANS_TIER[t.m]], dash = INNER_DASH;
       const pl = L.polygon(Rk.latlng, { renderer: lineR, ...lineStyle("sel"), color: lc, dashArray: dash, fill: false, interactive: false });
       pl.tripleDash = dash; pl.lineColor = lc; pl.addTo(regionLayer);
-      extra.push([t.k, `<span style="color:${lc}">${t.k} 位以内（${t.m === "base" ? "点線" : "破線"}）${fmtArea(sphericalArea(Rk.latlng))} km²</span>`]);
+      extra.push([t.k, `<span style="color:${lc}">${t.k} 位以内 ${fmtArea(sphericalArea(Rk.latlng))} km²</span>`]);
     }
     if (fly && !st.bootView) fitVisible(poly.getBounds(), { maxZoom: 13 });
     const area = sphericalArea(R.latlng);
@@ -1310,8 +1312,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
       return `<li><span class="no${sq ? " sq" : ""}" style="${sq ? `color:${c};border-color:${c}` : `background:${c}`}"><i class="${q >= 100 ? "n3" : q >= 10 ? "n2" : ""}">${q}</i></span><span class="nm2${uaHi() && isUa(i) ? " u" : ""}">${esc(r[2])}</span><span class="d2">${sq ? `(${km(s0[4], s0[5], r[4], r[5])})` : km(lat, lng, r[4], r[5])}</span></li>`; };
     let html = R.fromPos.slice(1).map(([i, q]) => row(i, q, false)).join("");
     // オモイダース: counted from the registered (nearest) station, only those the position's radar lacks (square numbers,
-    // as on the map; the user missed them here when they were only in the panel)
-    if ($("radarMarks").checked && $("stnMarks").checked && R.fromStnNew.length)
+    // as on the map; the user missed them here when they were only in the panel). Always listed, whatever the map marks (user)
+    if (R.fromStnNew.length)
       html += `<li class="sep">オモイダース（${esc(st.rows[R.near][2])}から）で新たに入る駅</li>` + R.fromStnNew.map(([i, q]) => row(i, q, true)).join("");
     nearBox.querySelector("ol").innerHTML = html;
   }
@@ -1412,6 +1414,10 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     drawDots();
   });
   $("followPause").addEventListener("change", () => { try { localStorage.setItem("followPause", $("followPause").value); } catch (e) {} });
+  $("realDist").addEventListener("change", () => {
+    try { localStorage.setItem("realDist", $("realDist").checked ? "1" : "0"); } catch (e) {}
+    if (track.pos) evaluate(false);
+  });
   $("autoZoom").addEventListener("change", () => { try { localStorage.setItem("autoZoom", $("autoZoom").checked ? "1" : "0"); } catch (e) {} });
   $("geoRate").addEventListener("change", () => {
     try { localStorage.setItem("geoRate", $("geoRate").value); } catch (e) {}
@@ -1519,8 +1525,8 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // count, which floats the six (with a close button) out to its left (user)
   const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5" stroke-width="1.3"/><path d="M12 2.5v19M2.5 12h19" stroke-width="1.2"/><path d="M12 12 18.7 5.3A9.5 9.5 0 0 1 21.5 12z" fill="currentColor" fill-opacity=".55" stroke="none"/><path d="M12 12 18.7 5.3" stroke-width="2" stroke-linecap="round"/></svg>';
   const ICON_BOOSTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="14" r="7.5"/><circle cx="10" cy="14" r="3.6" stroke-width="1.2"/><path d="M10 6.5v15M2.5 14h15" stroke-width="1.1"/><path d="M10 14l5.3-5.3A7.5 7.5 0 0 1 17.5 14z" fill="currentColor" fill-opacity=".55" stroke="none"/><path d="M19 1.8v6.4M15.8 5h6.4" stroke-width="2.2" stroke-linecap="round"/></svg>';
-  // natsume (provisional, user): twin tails with ribbons
-  const ICON_NATSUME = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8.6" r="4.8"/><rect x="10.6" y="12" width="2.8" height="4" rx="1"/><path d="M5.5 22c.4-3.4 2.9-5.6 6.5-5.6s6.1 2.2 6.5 5.6z"/><path d="M7.5 7.4C4.9 8.2 4 11.4 4.5 14.4c.3 1.5.9 2.6 1.8 3-.2-1.8 0-4.1 1-6.1.4-.8.8-1.5 1.2-2z"/><path d="M16.5 7.4c2.6.8 3.5 4 3 7-.3 1.5-.9 2.6-1.8 3 .2-1.8 0-4.1-1-6.1-.4-.8-.8-1.5-1.2-2z"/><path d="M7.4 5.8 4.4 4.2v3.4zM7.4 5.8l2.6-1.9-.3 3.3zM16.6 5.8l3-1.6v3.4zM16.6 5.8 14 3.9l.3 3.3z"/></svg>';
+  // natsume (user picked A3 from the drafts): a bust with twin tails and ribbons, the neck joined to the shoulders
+  const ICON_NATSUME = '<svg viewBox="0 0 24 24" fill="currentColor"><g transform="translate(0 1.1)"><circle cx="12" cy="8.6" r="4.8"/><path d="M7.5 7.4C4.9 8.2 4 11.4 4.5 14.4c.3 1.5.9 2.6 1.8 3-.2-1.8 0-4.1 1-6.1.4-.8.8-1.5 1.2-2z"/><path d="M16.5 7.4c2.6.8 3.5 4 3 7-.3 1.5-.9 2.6-1.8 3 .2-1.8 0-4.1-1-6.1-.4-.8-.8-1.5-1.2-2z"/><path d="M7.4 5.8 4.4 4.2v3.4zM7.4 5.8l2.6-1.9-.3 3.3zM16.6 5.8l3-1.6v3.4zM16.6 5.8 14 3.9l.3 3.3z"/><path d="M10.8 12.6h2.4v2.4h-2.4z"/><path d="M4.6 21c.2-3 1.9-5.3 4.6-6.1.8.6 1.8.9 2.8.9s2-.3 2.8-.9c2.7.8 4.4 3.1 4.6 6.1z"/></g></svg>';
   radarCtl.onAdd = () => {
     const compact = document.body.classList.contains("compact");
     const box = L.DomUtil.create("div", "leaflet-bar geo-ctl radar-ctl" + (compact ? " compact" : ""));
@@ -1857,7 +1863,14 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     return 2 * R * Math.asin(Math.sqrt(h));
   }
   const fmtKm = (d) => d < 10 ? d.toFixed(2) + " km" : d.toFixed(1) + " km";
-  const km = (a1, o1, a2, o2) => fmtKm(kmOf(a1, o1, a2, o2));
+  // the distance in the chosen metric, in km (1° of latitude ≈ 111.2 km), so the order matches the ranks; sphere = real
+  function metricKm(a1, o1, a2, o2) {
+    if (st.metric === "sphere") return kmOf(a1, o1, a2, o2);
+    const k = st.metric === "cos" ? Math.cos(36 * DEG) : 1;
+    return Math.hypot(a2 - a1, (o2 - o1) * k) * 6371.0088 * DEG;
+  }
+  // the nearest-station box: real distance unless the user turned "realDist" off (then the metric's)
+  const km = (a1, o1, a2, o2) => fmtKm(($("realDist").checked ? kmOf : metricKm)(a1, o1, a2, o2));
   function sphericalArea(ll) { // km², via local equal-area approximation per polygon (fine at this scale)
     const R = 6371.0088; let s = 0;
     for (let i = 0; i < ll.length; i++) {
@@ -2368,6 +2381,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     const ro = JSON.parse(localStorage.getItem("radarOpts") || "{}"); for (const id of RADAR_OPTS) if (typeof ro[id] === "boolean") $(id).checked = ro[id];
     const bz = localStorage.getItem("bndZoom"); if (bz !== null && [...$("bndZoom").options].some(o => o.value === bz)) $("bndZoom").value = bz;
     $("autoZoom").checked = localStorage.getItem("autoZoom") === "1";
+    $("realDist").checked = localStorage.getItem("realDist") !== "0";
     $("geoFollow").checked = localStorage.getItem("geoFollow") !== "0";
     const fp = localStorage.getItem("followPause"); if (fp !== null && [...$("followPause").options].some(o => o.value === fp)) $("followPause").value = fp;
     const r = localStorage.getItem("geoRate"); if (r !== null && [...$("geoRate").options].some(o => o.value === r)) $("geoRate").value = r;
