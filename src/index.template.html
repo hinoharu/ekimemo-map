@@ -43,7 +43,7 @@ html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink
   #map, #nearBox, #updBar, #toast, #grpBar, #selBar, .menu-fab { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 }
 .panel {
-  position: fixed; z-index: 1000; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
+  position: fixed; z-index: 1060; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px)); /* over the nearest station's open list (1050), under the toasts (1100) */
   width: 320px; max-height: calc(100% - 54px); overflow: auto; /* 12 px above and below, minus padding and border (30 px) */
   background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
   box-shadow: 0 6px 24px rgba(29, 36, 51, 0.16); padding: 14px 16px; display: grid; gap: 12px;
@@ -129,7 +129,7 @@ body.compact #selBar .fig, body.compact #selBar .kana { display: none; }
 @media (max-width: 640px) { body:not(.folded) #grpBar, body:not(.folded) #selBar, body:not(.folded) #barBadge { display: none; } } /* over the open panel */
 body.compact #barBadge { left: 46px; }
 body.compact #grpBar, body.compact #selBar { left: 46px; max-width: calc(100% - 110px); } /* right of the left buttons */
-@media (min-width: 641px) { body:not(.folded) #grpBar, body:not(.folded) #selBar { left: 352px; max-width: calc(100% - 420px); } } /* right of the open panel */
+@media (min-width: 641px) { body:not(.folded) #grpBar, body:not(.folded) #selBar { left: 352px; max-width: calc(100% - 420px); } body:not(.folded) #barBadge { left: 352px; } } /* right of the open panel */
 #updBar { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: calc(64px + var(--gb, 0px) + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 8px; color: #fff; padding: 6px 6px 6px 14px; border-radius: 10px;
   font-size: 13px; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
