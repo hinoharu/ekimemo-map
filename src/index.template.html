@@ -756,6 +756,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     st.rows = !$("hideClosed").checked ? st.all : st.all.filter(r => !r[6] || st.ua.has(r[2])); // unacquired: always
     const lat = Float64Array.from(st.rows.map(r => r[4])), lng = Float64Array.from(st.rows.map(r => r[5]));
     st.idx = makeIndex(lat, lng);
+    // the only place that changes the station set: a new generation (part of every region key, see regionEnv)
     st.cache.clear(); st.lcache.clear(); st.gen++;
     if (worker) worker.postMessage({ type: "data", gen: st.gen, lat, lng });
     drawStations();
@@ -920,8 +921,16 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   const lvOpacity = (f) => 1 - (2 / 3) * f; // f = j / k
 
   // ---------------- region computation (cached)
+  // Everything a region depends on besides the station and k: the station set (st.gen, advanced by applyFilter, the
+  // only place that changes the set), the metric and the clip window. Every cache of regions is keyed by all of them
+  // and the worker gets them with each job (its Delaunay cells are keyed by them too), so a change of any of them can
+  // never reuse an old result even if a cache is not cleared. A new input that changes regions goes into
+  // regionEnv (and the worker's cellsFor key), nowhere else. (The fast / one-by-one switch does not change results.)
+  const regionEnv = () => ({ gen: st.gen, metric: st.metric, clip: st.clip });
+  const regionKey = (e, k, i) => `${e.gen}|${e.metric}|${e.clip}|${k}|${i}`;
+  const keyK = (key) => key.split("|")[3]; // k of a regionKey
   function region(i, k) {
-    const key = `${st.metric}|${st.clip}|${k}|${i}`;
+    const key = regionKey(regionEnv(), k, i);
     let R = st.cache.get(key);
     if (!R) { R = regionOf(st.idx, i, k, st.metric, st.clip); st.cache.set(key, R); }
     return R;
@@ -934,10 +943,12 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   // replaces the older one in the worker. Without Worker support the same jobs run here in small slices.
   const WORKER_SRC = `
     let idx = null, gen = -1, running = false, vc = null, vcKey = ""; const jobs = new Map();
-    // all order-1 regions at once (voronoiCells), built on first use for a metric / clip; null cells: regionOf
+    // all order-1 regions at once (voronoiCells), built on first use for the station set (gen), metric and clip:
+    // the same inputs as regionEnv in the page; null cells: regionOf
     const cellsFor = (metric, clip) => {
-      if (vcKey !== metric + "|" + clip) {
-        vc = voronoiCells(Delaunator, idx, metric, clip); vcKey = metric + "|" + clip;
+      const key = gen + "|" + metric + "|" + clip;
+      if (vcKey !== key) {
+        vc = voronoiCells(Delaunator, idx, metric, clip); vcKey = key;
         self.postMessage({ type: "cells", gen, metric, clip, used: vc.used, n: idx.n, ms: vc.ms });
       }
       return vc;
@@ -969,19 +980,19 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
     worker.onmessage = (e) => {
       const m = e.data; if (m.gen !== st.gen) return;
       if (m.type === "cells") { st.cellsInfo = Object.assign(m, { t: performance.now() }); return; } // the cells were (re)built: for the debug timing
-      for (const [i, k, ll] of m.out) st.lcache.set(`${m.metric}|${m.clip}|${k}|${i}`, ll);
+      for (const [i, k, ll] of m.out) st.lcache.set(regionKey(m, k, i), ll); // m: the job's gen, metric, clip
       const cb = asyncCb.get(m.ch); if (cb && cb.job === m.job) cb.onBatch(m.out);
     };
     worker.onerror = () => { worker = null; };
   } catch (e) { worker = null; }
-  const cachedLL = (i, k) => { const key = `${st.metric}|${st.clip}|${k}|${i}`, R = st.cache.get(key); return R ? R.latlng : st.lcache.get(key); };
+  const cachedLL = (i, k) => { const key = regionKey(regionEnv(), k, i), R = st.cache.get(key); return R ? R.latlng : st.lcache.get(key); };
   // regions for items [[i, k], ...]: cached ones at once, the rest as they are computed; onBatch([[i, k, latlng], ...])
   function regionsAsync(ch, items, onBatch) {
     const job = ++jobSeq, hit = [], miss = [];
     for (const [i, k] of items) { const ll = cachedLL(i, k); if (ll) hit.push([i, k, ll]); else miss.push([i, k]); }
     asyncCb.set(ch, { job, onBatch });
     if (hit.length) onBatch(hit);
-    if (worker) { worker.postMessage({ ch, job, gen: st.gen, metric: st.metric, clip: st.clip, fast: $("fastVor").checked, items: miss }); return; }
+    if (worker) { worker.postMessage({ ch, job, ...regionEnv(), fast: $("fastVor").checked, items: miss }); return; }
     let q = 0;
     const step = () => {
       const cb = asyncCb.get(ch); if (!cb || cb.job !== job) return;
@@ -1449,7 +1460,7 @@ const BUILD_ID = "/*BUILD*/"; // the same id as in dist/sw.js (scripts/build.py)
   $("fastVor").addEventListener("change", () => {
     const on = $("fastVor").checked;
     try { localStorage.setItem("fastVor", on ? "1" : "0"); } catch (e) {}
-    for (const c of [st.lcache, st.cache]) for (const key of [...c.keys()]) if (key.split("|")[2] === "1") c.delete(key);
+    for (const c of [st.lcache, st.cache]) for (const key of [...c.keys()]) if (keyK(key) === "1") c.delete(key);
     debugCtl.update();
     if ($("vor1").checked && map.getZoom() >= +$("bndZoom").value) { st.vorTiming = true; drawVor(); }
     else toast(`位置登録の範囲：${on ? "まとめて計算" : "従来の計算"}（隣接駅間の境界線を表示していないので、時間は測っていません）`);
